@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Bookly Support</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="brand">
+        <span class="logo">📚</span>
+        <div>
+          <h1>Bookly Support</h1>
+          <p>AI customer support demo</p>
+        </div>
+      </div>
+      <div id="status" class="status">Connecting…</div>
+    </header>
+
+    <main id="chat" class="chat" aria-live="polite"></main>
+
+    <div class="suggestions">
+      <span>Try:</span>
+      <button type="button" class="chip" data-msg="Where is my order?">Order status</button>
+      <button type="button" class="chip" data-msg="I want to return a book">Start a return</button>
+      <button type="button" class="chip" data-msg="What's your shipping policy?">Shipping policy</button>
+    </div>
+
+    <form id="form" class="composer">
+      <input
+        id="input"
+        type="text"
+        placeholder="Ask about orders, returns, or policies…"
+        autocomplete="off"
+        required
+      />
+      <button type="submit">Send</button>
+    </form>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
