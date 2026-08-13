@@ -20,9 +20,11 @@ import uuid
 from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, render_template, request
 import anthropic
-from elevenlabs import ElevenLabs
+from elevenlabs import ElevenLabs, VoiceSettings
 
-from tools import TOOLS_SCHEMA, execute_tool, tool_result_content
+from tts_utils import prepare_text_for_speech
+
+from tools import BOOKLY_AGENT_INSTRUCTIONS, TOOLS_SCHEMA, execute_tool, init_session, ping_bookly, tool_result_content
 
 # Load secrets from .env before reading os.environ
 load_dotenv()
@@ -32,8 +34,16 @@ app = Flask(__name__)
 # --- Configuration -----------------------------------------------------------
 
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
-ELEVEN_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
-ELEVEN_MODEL_ID = "eleven_turbo_v2_5"  # low-latency TTS for live voice demo
+# ElevenLabs TTS — tuned for stable, natural support-agent speech (not turbo/low-latency)
+ELEVEN_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "EXAVITQu4vr4xnSDxMaL")  # Sarah
+ELEVEN_MODEL_ID = os.environ.get("ELEVENLABS_MODEL", "eleven_multilingual_v2")
+# High stability = fewer weird inflections and hallucinated audio at clip ends
+ELEVEN_VOICE_SETTINGS = VoiceSettings(
+    stability=0.72,
+    similarity_boost=0.8,
+    style=0.0,
+    use_speaker_boost=False,
+)
 
 anthropic_client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 eleven_client = ElevenLabs(api_key=os.environ.get("ELEVENLABS_API_KEY"))
@@ -43,27 +53,60 @@ CONVERSATIONS: dict[str, list] = {}
 
 # --- System prompt: scope + guardrails for flexible NLU ----------------------
 
-SYSTEM_PROMPT = """You are Riley, a customer support agent for Bookly, an online bookstore.
+SYSTEM_PROMPT = f"""You are Riley, a friendly Bookly support agent. You talk like a real person on live chat or the phone — casual, warm, and brief.
 
-You help with three things only: order status, returns/refunds, and general
-questions about shipping, policies, or password resets. If asked about anything
-else (e.g. book recommendations), politely say it's outside what you can help with.
+You have tools that call the live Bookly order-management API on the customer's behalf.
+{BOOKLY_AGENT_INSTRUCTIONS}
+
+Recommended flow (internal — do not recite this to the customer):
+1. meta for sample IDs/rules if needed
+2. Identify customer via email or order number
+3. Order status: get_order, get_order_shipments, get_shipment
+4. Returns: return_eligibility → get_order_items → create_return
+5. Policies: list_policies / get_policy / list_faqs
+6. password_reset, address_change, create_ticket when needed
+
+Identity verification (required — enforced by tools):
+- Before revealing ANY order or customer info (status, items, address, tracking, refunds, etc.),
+  you MUST verify the last 4 digits of the primary phone on file via verify_phone_last_four.
+- If they ask about an order, get the order number or email first, then ask for the last 4 digits.
+  Do not share order details until verify_phone_last_four returns verified:true.
+- If verification fails, ask them to try again — never reveal what the correct digits are.
+- Policy/FAQ answers (list_policies, list_faqs) do not require verification.
+
+Loyalty early refund (3+ purchases in last year):
+- Normally refunds happen after Bookly receives the return (receive_return / auto_refund).
+- Loyal customers with 3+ orders in the last 365 days may get refunded BEFORE the book is received.
+- Use check_loyalty_early_refund to confirm eligibility before promising this.
+- Flow: create_return → create_refund with return_id (only if loyalty check passes).
+- If not eligible, explain they'll get refunded once Bookly gets the book back — keep it casual.
+
+Progressive disclosure (critical — this is a live conversation):
+- Say the MINIMUM needed to move the conversation forward. One fact, one question, or one action per turn.
+- Answer what they asked — nothing extra. Do not dump order details, item lists, addresses, or totals unprompted.
+  • "Where's my order?" → after verify: "Still processing — hasn't shipped yet." STOP. Wait for follow-up.
+  • Only add tracking, ETA, or items if they ask for that specifically.
+  • "Return policy?" → one sentence. Offer to go deeper only if they ask.
+- Never recap tool results they didn't ask for. You have the data; they don't need it all at once.
+- Hard target: ~15–30 words per reply. Two short sentences max. Three only if confirming a refund/RMA number.
+- One question per turn. Never stack asks ("what's your order number and last four digits?" → ask one, then the other).
+
+Tone:
+- Casual, warm, contractions. Like texting a helpful friend who works at Bookly.
+- No markdown, no bullets, no sign-offs, no menus, no "I'd be happy to help!"
+- If a tool fails, one plain sentence — no error codes.
 
 Rules:
-- Never invent order details, refund confirmations, or policy text. Always use
-  the provided tools to look things up — if you don't have a tool result, say so.
-- For order status or refunds, if the customer hasn't given you an order ID,
-  ASK for it before calling a tool. Do not guess an order ID.
-- For refunds specifically, you need BOTH an order ID and a reason before calling
-  initiate_refund. If either is missing, ask a clarifying question first.
-- Keep responses short and conversational — this is a live chat/voice interface,
-  not an email. Aim for 1-3 sentences unless listing order details.
-- If a request is ambiguous (e.g. "I have a problem with my order" with no detail),
-  ask a clarifying question rather than guessing what they mean.
+- Never invent order details, tracking, refunds, or policy text — always use tools first.
+- Ask for order number or email before lookups if you don't have it.
+- Check return_eligibility before create_return or promising a refund.
+- Money in API responses is cents — say dollars to the customer.
+- If a tool fails, say what happened in plain English, no error codes.
+- Book recs are out of scope unless they need a replacement (list_books).
 """
 
 
-def run_agent_turn(history: list) -> str:
+def run_agent_turn(history: list, session_id: str) -> str:
     """
     Run one user turn through Claude's tool-use loop.
 
@@ -76,7 +119,7 @@ def run_agent_turn(history: list) -> str:
     """
     response = anthropic_client.messages.create(
         model=ANTHROPIC_MODEL,
-        max_tokens=1024,
+        max_tokens=512,
         system=SYSTEM_PROMPT,
         tools=TOOLS_SCHEMA,
         messages=history,
@@ -91,7 +134,7 @@ def run_agent_turn(history: list) -> str:
         tool_results = []
         for block in response.content:
             if block.type == "tool_use":
-                result = execute_tool(block.name, block.input)
+                result = execute_tool(block.name, block.input, session_id=session_id)
                 tool_results.append(
                     {
                         "type": "tool_result",
@@ -105,7 +148,7 @@ def run_agent_turn(history: list) -> str:
 
         response = anthropic_client.messages.create(
             model=ANTHROPIC_MODEL,
-            max_tokens=1024,
+            max_tokens=512,
             system=SYSTEM_PROMPT,
             tools=TOOLS_SCHEMA,
             messages=history,
@@ -128,12 +171,18 @@ def index():
 @app.route("/api/health")
 def health():
     """Quick status check for the UI and for debugging."""
+    bookly = ping_bookly()
     return jsonify(
         {
             "status": "ok",
             "anthropic_configured": bool(os.environ.get("ANTHROPIC_API_KEY")),
             "elevenlabs_configured": bool(os.environ.get("ELEVENLABS_API_KEY")),
             "model": ANTHROPIC_MODEL,
+            "bookly_api": {
+                "ok": bookly.get("ok", False),
+                "status": bookly.get("status"),
+            },
+            "tools_loaded": len(TOOLS_SCHEMA),
         }
     )
 
@@ -143,6 +192,7 @@ def new_session():
     """Create a fresh conversation session."""
     session_id = str(uuid.uuid4())
     CONVERSATIONS[session_id] = []
+    init_session(session_id)
     return jsonify({"session_id": session_id})
 
 
@@ -166,7 +216,7 @@ def chat():
     history.append({"role": "user", "content": user_message})
 
     try:
-        reply_text = run_agent_turn(history)
+        reply_text = run_agent_turn(history, session_id)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500
 
@@ -187,11 +237,15 @@ def tts():
         return jsonify({"error": "ELEVENLABS_API_KEY is not set."}), 500
 
     try:
+        # Strip markdown before TTS — raw Claude output causes glitches and misreads
+        spoken_text = prepare_text_for_speech(text)
         audio_stream = eleven_client.text_to_speech.convert(
             voice_id=ELEVEN_VOICE_ID,
-            text=text,
+            text=spoken_text,
             model_id=ELEVEN_MODEL_ID,
+            voice_settings=ELEVEN_VOICE_SETTINGS,
             output_format="mp3_44100_128",
+            seed=42,  # more consistent tone across turns
         )
         audio_bytes = b"".join(audio_stream)
     except Exception as exc:

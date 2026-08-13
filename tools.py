@@ -1,156 +1,71 @@
 """
-Mocked Bookly backend + Claude tool schemas.
-
-Production would call real OMS / payments / CMS APIs. Here we use in-memory
-data so the agent's tool-calling loop is real while the data is fake.
+Agent tool layer — Bookly OMS API with phone verification and loyalty gates.
 """
 
-import json
+from bookly_client import BooklyClient, tool_result_content
+from loyalty import CHECK_LOYALTY_TOOL, gate_early_refund, loyalty_status
+from verification import (
+    VERIFY_PHONE_TOOL,
+    check_tool_allowed,
+    init_session,
+    verify_phone_last_four,
+)
 
-# ---------------------------------------------------------------------------
-# Mock data — pretend this is Bookly's order management system
-# ---------------------------------------------------------------------------
+_client = BooklyClient.from_env()
 
-MOCK_ORDERS = {
-    "BK-1001": {
-        "status": "Shipped",
-        "carrier": "UPS",
-        "eta": "Aug 15, 2026",
-        "items": ["The Midnight Library"],
-        "total": "$18.99",
-    },
-    "BK-1002": {
-        "status": "Processing",
-        "carrier": None,
-        "eta": None,
-        "items": ["Atomic Habits", "Dune"],
-        "total": "$34.50",
-    },
-    "BK-1003": {
-        "status": "Delivered",
-        "carrier": "USPS",
-        "eta": "Aug 10, 2026",
-        "items": ["Project Hail Mary"],
-        "total": "$16.00",
-    },
-}
+# Manifest tools + custom verification + loyalty check
+TOOLS_SCHEMA = _client.anthropic_tools() + [VERIFY_PHONE_TOOL, CHECK_LOYALTY_TOOL]
 
-POLICIES = {
-    "shipping": (
-        "Standard shipping is 5-7 business days and free on orders over $25 "
-        "(otherwise $4.99). Express shipping (2-3 business days) is $9.99."
-    ),
-    "returns": (
-        "Items can be returned within 30 days of delivery for a full refund, "
-        "as long as the book is unmarked and in resellable condition. "
-        "Refunds are issued to the original payment method within 5-7 business days."
-    ),
-    "password_reset": (
-        "To reset your password: go to bookly.com/login, click 'Forgot password', "
-        "and follow the emailed link. The link expires after 24 hours."
-    ),
-}
+BOOKLY_AGENT_INSTRUCTIONS = _client.instructions
 
-# ---------------------------------------------------------------------------
-# Tool schemas — Claude reads these to decide WHEN and HOW to call tools.
-# The model chooses tools freely; guardrails live in the system prompt.
-# ---------------------------------------------------------------------------
 
-TOOLS_SCHEMA = [
-    {
-        "name": "get_order_status",
-        "description": (
-            "Look up the current status, carrier, ETA, and items for a Bookly order. "
-            "Only call when you have a valid order ID from the customer."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "order_id": {
-                    "type": "string",
-                    "description": "Bookly order ID, e.g. BK-1001.",
+def _bookly_execute(name: str, tool_input: dict) -> dict:
+    """Raw Bookly API call (bypasses gates — internal use only)."""
+    return _client.execute_tool(name, tool_input)
+
+
+def execute_tool(name: str, tool_input: dict, session_id: str | None = None) -> dict:
+    """Dispatch a Claude tool_use call with verification and loyalty enforcement."""
+    if name == "verify_phone_last_four":
+        if not session_id:
+            return {"ok": False, "error": "missing_session"}
+        return verify_phone_last_four(
+            _bookly_execute,
+            session_id,
+            last_four=str(tool_input.get("last_four", "")),
+            order_id=tool_input.get("order_id"),
+            email=tool_input.get("email"),
+        )
+
+    if name == "check_loyalty_early_refund":
+        return loyalty_status(
+            _bookly_execute,
+            order_id=tool_input.get("order_id"),
+            email=tool_input.get("email"),
+        )
+
+    if session_id:
+        blocked = check_tool_allowed(session_id, name, tool_input)
+        if blocked:
+            return blocked
+
+    # Loyalty gate: early refund before return is received
+    if name == "create_refund":
+        loyalty_block = gate_early_refund(_bookly_execute, tool_input)
+        if loyalty_block:
+            return loyalty_block
+        # Tag loyalty-approved refunds for audit trail
+        if tool_input.get("return_id"):
+            ret_check = _bookly_execute("get_return", {"rma": tool_input["return_id"]})
+            if ret_check.get("ok") and not ret_check.get("data", {}).get("received_at"):
+                reason = tool_input.get("reason") or "return refund"
+                tool_input = {
+                    **tool_input,
+                    "reason": f"{reason} [loyalty early refund approved]",
                 }
-            },
-            "required": ["order_id"],
-        },
-    },
-    {
-        "name": "initiate_refund",
-        "description": (
-            "Start a refund for an order. Requires BOTH order_id AND reason from "
-            "the customer — never guess either value."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "order_id": {
-                    "type": "string",
-                    "description": "Bookly order ID, e.g. BK-1002.",
-                },
-                "reason": {
-                    "type": "string",
-                    "description": "Customer's stated reason for the return/refund.",
-                },
-            },
-            "required": ["order_id", "reason"],
-        },
-    },
-    {
-        "name": "lookup_policy",
-        "description": "Fetch official Bookly policy text for shipping, returns, or password reset.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "topic": {
-                    "type": "string",
-                    "enum": ["shipping", "returns", "password_reset"],
-                    "description": "Which policy topic to retrieve.",
-                }
-            },
-            "required": ["topic"],
-        },
-    },
-]
+
+    return _client.execute_tool(name, tool_input)
 
 
-def execute_tool(name: str, tool_input: dict) -> dict:
-    """
-    Dispatch a Claude tool_use call to the mocked backend.
-    Returns a plain dict; app.py serializes it to JSON for Claude.
-    """
-    if name == "get_order_status":
-        order_id = tool_input.get("order_id", "").strip().upper()
-        order = MOCK_ORDERS.get(order_id)
-        if not order:
-            return {
-                "error": f"No order found with ID {order_id}. Ask the customer to double-check it."
-            }
-        return {"order_id": order_id, **order}
-
-    if name == "initiate_refund":
-        order_id = tool_input.get("order_id", "").strip().upper()
-        reason = tool_input.get("reason", "").strip()
-        if order_id not in MOCK_ORDERS:
-            return {"error": f"No order found with ID {order_id}. Cannot initiate refund."}
-        return {
-            "status": "refund_initiated",
-            "order_id": order_id,
-            "reason": reason,
-            "refund_id": f"RF-{order_id[-4:]}",
-            "eta_business_days": 5,
-            "message": "Prepaid return label will be emailed within 24 hours.",
-        }
-
-    if name == "lookup_policy":
-        topic = tool_input.get("topic", "")
-        policy_text = POLICIES.get(topic)
-        if not policy_text:
-            return {"error": f"No policy found for topic '{topic}'."}
-        return {"topic": topic, "policy": policy_text}
-
-    return {"error": f"Unknown tool '{name}'."}
-
-
-def tool_result_content(result: dict) -> str:
-    """Serialize tool output as JSON so Claude parses structured data reliably."""
-    return json.dumps(result)
+def ping_bookly() -> dict:
+    return _client.ping()

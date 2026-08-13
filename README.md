@@ -1,18 +1,19 @@
 # Bookly Support Agent
 
-Conversational customer support agent for **Bookly** (fictional online bookstore).
-Built for the Decagon Solutions Engineering take-home.
+Conversational customer support agent for **Bookly**, wired to the live
+[Bookly Support API](https://bookly-agent-api.lovable.app) on Lovable.
 
 ## Architecture
 
 ```
-Browser (chat + mic via Web Speech API)
-  → POST /api/chat   (Claude tool-use loop — prompt-guided, agentic)
-  → POST /api/tts    (ElevenLabs text-to-speech)
+Browser (chat + mic)
+  → POST /api/chat   Claude tool-use loop (33 tools from MCP manifest)
+  → Bookly API      https://bookly-agent-api.lovable.app/api/public/v1/...
+  → POST /api/tts    ElevenLabs text-to-speech
 ```
 
-Claude decides when to call tools based on the conversation. No slot-filling
-state machine — guardrails live in the system prompt and tool schemas.
+Claude calls real read/write endpoints (orders, returns, refunds, policies,
+tickets, etc.) via the MCP-style manifest at `/api/public/tools.json`.
 
 ## Quick start
 
@@ -21,39 +22,39 @@ chmod +x run.sh
 ./run.sh
 ```
 
-Open **http://127.0.0.1:5000** in **Chrome** (required for microphone / STT).
+Open **http://127.0.0.1:5000** in **Chrome** for voice.
 
-Copy `.env.example` to `.env` and add your keys if needed:
+## API integration
 
-```bash
-cp .env.example .env
-```
+| Resource | URL |
+|----------|-----|
+| Tool manifest | https://bookly-agent-api.lovable.app/api/public/tools.json |
+| OpenAPI | https://bookly-agent-api.lovable.app/api/public/openapi.json |
+| LLM overview | https://bookly-agent-api.lovable.app/llms.txt |
 
-## Demo flows
+Tools are loaded from `BOOKLY_MANIFEST_URL` at startup (cached in `data/bookly_tools.json`).
 
-| Flow | Try saying |
-|------|------------|
-| Order status | "What's the status of order BK-1001?" |
-| Clarifying question | "Where's my order?" (no ID — agent asks) |
-| Multi-turn refund | "I want a refund" → BK-1003 → "book arrived damaged" |
-| Policy | "How long do I have to return something?" |
-| Out of scope | "Recommend a sci-fi novel" (agent declines) |
+## Demo flows (live data)
 
-Mock order IDs: `BK-1001`, `BK-1002`, `BK-1003`.
+| Flow | Example |
+|------|---------|
+| Order status | "What's the status of order BK-10001?" |
+| Lookup by email | "Find orders for priya.nair@example.com" |
+| Return | "I want to return BK-10003, it arrived damaged" |
+| Policy | "What's your return policy?" |
+| Password reset | "I can't log in — email is ava.brooks@example.com" |
 
-## Voice
-
-- **STT (speech in):** Browser Web Speech API — fast, free, works on localhost in Chrome
-- **TTS (speech out):** ElevenLabs via `/api/tts`
-- Mic auto-sends after transcription; toggle spoken replies in the UI
+Call `GET /api/public/v1/meta` for fresh sample IDs.
 
 ## Files
 
 | File | Purpose |
 |------|---------|
-| `app.py` | Flask server + Claude tool-use orchestration loop |
-| `tools.py` | Mock Bookly backend + tool schemas |
-| `templates/index.html` | Chat UI with mic + voice playback |
+| `app.py` | Flask + Claude orchestration loop |
+| `bookly_client.py` | Manifest loader + HTTP tool executor |
+| `tools.py` | Thin wrapper exposing tools to the agent |
+| `data/bookly_tools.json` | Cached MCP manifest |
+| `templates/index.html` | Chat + voice UI |
 
 ## License
 

@@ -200,7 +200,7 @@ function addTyping() {
   const div = document.createElement('div');
   div.className = 'typing';
   div.id = 'typingIndicator';
-  div.textContent = 'Riley is thinking…';
+  div.textContent = 'Riley is typing…';
   log.appendChild(div);
   log.scrollTop = log.scrollHeight;
 }
@@ -223,9 +223,7 @@ async function initSession() {
   const data = await res.json();
   sessionId = data.session_id;
 
-  const greeting =
-    "Hi, I'm Riley from Bookly support. I can help with order status, returns, " +
-    "or shipping and account questions — what's going on?";
+  const greeting = "Hey! Riley from Bookly support — what's up?";
   addMessage('agent', greeting);
 
   // Speak the greeting if voice is enabled (voice-first demo)
@@ -383,6 +381,8 @@ async function checkHealth() {
     const parts = [];
     if (data.anthropic_configured) parts.push('Claude ready');
     else parts.push('Claude key missing');
+    if (data.bookly_api?.ok) parts.push(`${data.tools_loaded || 33} Bookly tools live`);
+    else parts.push('Bookly API unreachable');
     if (data.elevenlabs_configured) parts.push('ElevenLabs ready');
     else parts.push('ElevenLabs key missing');
     statusBar.textContent = parts.join(' · ') + ' · Mic: ' + (SpeechRecognition ? 'Chrome STT' : 'unavailable');

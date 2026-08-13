@@ -1,0 +1,1243 @@
+{
+  "schema_version": "2024-11-05",
+  "name": "bookly-support",
+  "title": "Bookly Support",
+  "version": "1.0.0",
+  "instructions": "Tools for the Bookly bookstore support agent. Resolve the customer first (email or order number), check policy/eligibility before promising anything, and escalate with create_ticket when a request cannot be resolved.",
+  "base_url": "https://bookly.davidbusacker.com",
+  "openapi_url": "https://bookly.davidbusacker.com/api/public/openapi.json",
+  "tools": [
+    {
+      "name": "health",
+      "title": "Service health",
+      "description": "Liveness probe plus database connectivity check and API version. Call once at startup to confirm the API and dataset are reachable.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "GET",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/health"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "meta",
+      "title": "Discovery metadata",
+      "description": "Row counts, live sample identifiers (order numbers, emails, RMAs, tracking numbers), every enum value and the business-rule constants. This is the recommended bootstrap call for an agent. Fetch first so you can use real identifiers in later calls instead of guessing.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "GET",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/meta"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "list_orders",
+      "title": "List / search orders",
+      "description": "Paginated order list with filters. Use `email` when a customer contacts support without an order number. Primary lookup when the customer gives an email address rather than an order number.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "GET",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/orders"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "Query parameter. Exact customer email."
+          },
+          "status": {
+            "type": "string",
+            "description": "Query parameter. Comma-separated list of order statuses.",
+            "enum": [
+              "processing",
+              "shipped",
+              "delivered",
+              "cancelled",
+              "returned",
+              "refunded",
+              "backordered",
+              "lost_in_transit"
+            ]
+          },
+          "order_number": {
+            "type": "string",
+            "description": "Query parameter. Exact order number, e.g. BK-10042."
+          },
+          "q": {
+            "type": "string",
+            "description": "Query parameter. Fuzzy search across order number and customer email."
+          },
+          "placed_after": {
+            "type": "string",
+            "description": "Query parameter. ISO date lower bound on placed_at."
+          },
+          "placed_before": {
+            "type": "string",
+            "description": "Query parameter. ISO date upper bound on placed_at."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Query parameter. Page size (1-100, default 25)."
+          },
+          "offset": {
+            "type": "integer",
+            "description": "Query parameter. Rows to skip (default 0)."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_order",
+      "title": "Get one order",
+      "description": "Full order with customer, line items, shipments, returns, refunds and transactions embedded. The single richest call for answering 'where is my order?'.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "GET",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/orders/{id}"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Path segment. Order UUID or human order number (e.g. BK-10042). Both are accepted everywhere."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_order_items",
+      "title": "List order line items",
+      "description": "Line items with the joined book record (format matters for return eligibility). Use the returned order_item_id values when creating a partial return.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "GET",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/orders/{id}/items"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Path segment. Order UUID or human order number (e.g. BK-10042). Both are accepted everywhere."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_order_shipments",
+      "title": "List shipments for an order",
+      "description": "All shipments for the order, each with its full tracking event history. Answer delivery-timing questions and detect stalled tracking.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "GET",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/orders/{id}/shipments"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Path segment. Order UUID or human order number (e.g. BK-10042). Both are accepted everywhere."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "cancel_order",
+      "title": "Cancel an order",
+      "description": "Cancels an order and voids the authorization. Only allowed while the status is processing or backordered. Use for 'cancel my order'. If it returns 409, offer a return instead.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "POST",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/orders/{id}/cancel"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Path segment. Order UUID or human order number (e.g. BK-10042). Both are accepted everywhere."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Free-text cancellation reason."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "reship_order",
+      "title": "Create a replacement shipment",
+      "description": "Generates a new shipment and tracking number. Allowed when the order is lost_in_transit or shipped. Use for lost-in-transit packages after confirming tracking is stalled.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "POST",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/orders/{id}/reship"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Path segment. Order UUID or human order number (e.g. BK-10042). Both are accepted everywhere."
+          },
+          "carrier": {
+            "type": "string",
+            "description": "Carrier, default UPS.",
+            "enum": [
+              "UPS",
+              "FedEx",
+              "USPS",
+              "DHL"
+            ]
+          },
+          "service_level": {
+            "type": "string",
+            "description": "Service level, default two_day.",
+            "enum": [
+              "ground",
+              "two_day",
+              "overnight"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "description": "Why the reshipment was issued."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "return_eligibility",
+      "title": "Check return eligibility",
+      "description": "Deterministic eligibility check. Standard window is 30 days from delivery; damaged or wrong-item claims get 90 days and waive the $4.99 label fee. Ebooks are non-returnable. Always call this before creating a return so you can explain the outcome to the customer.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "POST",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/orders/{id}/returns/eligibility"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Path segment. Order UUID or human order number (e.g. BK-10042). Both are accepted everywhere."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Intended return reason.",
+            "enum": [
+              "damaged",
+              "wrong_item",
+              "not_as_described",
+              "no_longer_needed",
+              "arrived_late",
+              "other"
+            ]
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "list_returns",
+      "title": "List returns",
+      "description": "Paginated returns with their items and parent order. Check whether a return already exists before creating a duplicate.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "GET",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/returns"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "Query parameter. Comma-separated return statuses.",
+            "enum": [
+              "requested",
+              "label_sent",
+              "in_transit",
+              "received",
+              "refunded",
+              "rejected",
+              "cancelled"
+            ]
+          },
+          "order_id": {
+            "type": "string",
+            "description": "Query parameter. Filter by order UUID."
+          },
+          "customer_id": {
+            "type": "string",
+            "description": "Query parameter. Filter by customer UUID."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Query parameter. Page size (1-100, default 25)."
+          },
+          "offset": {
+            "type": "integer",
+            "description": "Query parameter. Rows to skip (default 0)."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "create_return",
+      "title": "Create a return (RMA)",
+      "description": "Creates an RMA with a prepaid label and computes the expected refund. Rejects with 409 when the order is not eligible unless `override_eligibility` is true. Call after eligibility passes; pass order_item_id values from the order items endpoint.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "POST",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/returns"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "order_id": {
+            "type": "string",
+            "description": "Order UUID or order number."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Return reason.",
+            "enum": [
+              "damaged",
+              "wrong_item",
+              "not_as_described",
+              "no_longer_needed",
+              "arrived_late",
+              "other"
+            ]
+          },
+          "comment": {
+            "type": "string",
+            "description": "Customer's description of the problem."
+          },
+          "items": {
+            "type": "array",
+            "description": "Line items to return.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "order_item_id": {
+                  "type": "string",
+                  "description": "Order item UUID."
+                },
+                "quantity": {
+                  "type": "integer",
+                  "description": "Units returned."
+                }
+              },
+              "required": [
+                "order_item_id",
+                "quantity"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "override_eligibility": {
+            "type": "boolean",
+            "description": "Supervisor override that bypasses the eligibility gate."
+          }
+        },
+        "required": [
+          "order_id",
+          "reason",
+          "items"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_return",
+      "title": "Get a return",
+      "description": "Fetch a return by RMA number (RMA-12345) or UUID. Answer 'what is the status of my return?'.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "GET",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/returns/{rma}"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "rma": {
+            "type": "string",
+            "description": "Path segment. RMA number or UUID."
+          }
+        },
+        "required": [
+          "rma"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "receive_return",
+      "title": "Mark a return received",
+      "description": "Moves the return to `received`, optionally issuing the refund immediately. Warehouse-side action; set auto_refund to close the loop in one call.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "POST",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/returns/{rma}/receive"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "rma": {
+            "type": "string",
+            "description": "Path segment. RMA number or UUID."
+          },
+          "condition": {
+            "type": "string",
+            "description": "Received condition.",
+            "enum": [
+              "unopened",
+              "opened",
+              "damaged"
+            ]
+          },
+          "note": {
+            "type": "string",
+            "description": "Inspection note."
+          },
+          "auto_refund": {
+            "type": "boolean",
+            "description": "Issue the refund immediately."
+          }
+        },
+        "required": [
+          "rma"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "cancel_return",
+      "title": "Cancel a return",
+      "description": "Cancels an open RMA. Fails with 409 once the return is refunded. Use when the customer decides to keep the item.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "POST",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/returns/{rma}/cancel"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "rma": {
+            "type": "string",
+            "description": "Path segment. RMA number or UUID."
+          }
+        },
+        "required": [
+          "rma"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "list_refunds",
+      "title": "List refunds",
+      "description": "Paginated refunds with their parent order. Confirm whether money already went back before promising a new refund.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "GET",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/refunds"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "Query parameter. Comma-separated refund statuses."
+          },
+          "order_id": {
+            "type": "string",
+            "description": "Query parameter. Filter by order UUID."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Query parameter. Page size (1-100, default 25)."
+          },
+          "offset": {
+            "type": "integer",
+            "description": "Query parameter. Rows to skip (default 0)."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "create_refund",
+      "title": "Issue a refund",
+      "description": "Issues a full or partial refund, records the matching ledger transaction, credits store credit when requested and flips the order to `refunded` once fully covered. Over-refunding is rejected. Use for goodwill refunds and post-return settlements.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "POST",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/refunds"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "order_id": {
+            "type": "string",
+            "description": "Order UUID or order number."
+          },
+          "amount_cents": {
+            "type": "integer",
+            "description": "Defaults to the full remaining refundable amount."
+          },
+          "method": {
+            "type": "string",
+            "description": "Default original_payment.",
+            "enum": [
+              "original_payment",
+              "store_credit"
+            ]
+          },
+          "return_id": {
+            "type": "string",
+            "description": "Link the refund to an existing return."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Reason recorded on the ledger."
+          }
+        },
+        "required": [
+          "order_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_refund",
+      "title": "Get a refund",
+      "description": "Fetch a refund by refund number (RF-12345) or UUID. Give the customer the exact refund amount and timing.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "GET",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/refunds/{id}"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Path segment. Refund number or UUID."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "list_transactions",
+      "title": "List ledger transactions",
+      "description": "Immutable money ledger: charges, refunds and voids. Reconcile what the customer was actually charged.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "GET",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/transactions"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "order_id": {
+            "type": "string",
+            "description": "Query parameter. Filter by order UUID."
+          },
+          "customer_id": {
+            "type": "string",
+            "description": "Query parameter. Filter by customer UUID."
+          },
+          "type": {
+            "type": "string",
+            "description": "Query parameter. Comma-separated types.",
+            "enum": [
+              "charge",
+              "refund",
+              "void"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "description": "Query parameter. Comma-separated statuses."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Query parameter. Page size (1-100, default 25)."
+          },
+          "offset": {
+            "type": "integer",
+            "description": "Query parameter. Rows to skip (default 0)."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "list_customers",
+      "title": "List / search customers",
+      "description": "Search customers by email, fuzzy name/email query or loyalty tier. Identity resolution before touching order data.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "GET",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/customers"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "Query parameter. Case-insensitive exact email."
+          },
+          "q": {
+            "type": "string",
+            "description": "Query parameter. Fuzzy name or email search."
+          },
+          "tier": {
+            "type": "string",
+            "description": "Query parameter. Loyalty tier."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Query parameter. Page size (1-100, default 25)."
+          },
+          "offset": {
+            "type": "integer",
+            "description": "Query parameter. Rows to skip (default 0)."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_customer",
+      "title": "Get a customer",
+      "description": "Fetch by UUID or email (URL-encoded), including saved addresses and store credit. Check store credit balance before offering it as a refund method.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "GET",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/customers/{id}"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Path segment. Customer UUID or email address."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_customer_orders",
+      "title": "List a customer's orders",
+      "description": "Order history for a customer, newest first. Accepts UUID or email. Use when the customer says 'my last order' without a number.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "GET",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/customers/{id}/orders"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Path segment. Customer UUID or email."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Query parameter. Page size (1-100, default 25)."
+          },
+          "offset": {
+            "type": "integer",
+            "description": "Query parameter. Rows to skip (default 0)."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_shipment",
+      "title": "Track a shipment",
+      "description": "Fetch a shipment by tracking number or UUID, with its events and parent order. Direct tracking lookup when the customer pastes a tracking number.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "GET",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/shipments/{tracking}"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tracking": {
+            "type": "string",
+            "description": "Path segment. Tracking number or shipment UUID."
+          }
+        },
+        "required": [
+          "tracking"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_shipment_events",
+      "title": "Tracking event history",
+      "description": "Chronological scan events for a shipment. Detect a stalled package: no new scan for 7+ days means offer a reship.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "GET",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/shipments/{tracking}/events"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tracking": {
+            "type": "string",
+            "description": "Path segment. Tracking number."
+          }
+        },
+        "required": [
+          "tracking"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "list_books",
+      "title": "Search the catalog",
+      "description": "Search books by title, author or ISBN with category, format and stock filters. Recommend replacements or confirm stock before promising a reship.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "GET",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/books"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "q": {
+            "type": "string",
+            "description": "Query parameter. Search title, author or ISBN."
+          },
+          "category": {
+            "type": "string",
+            "description": "Query parameter. Exact category."
+          },
+          "format": {
+            "type": "string",
+            "description": "Query parameter. Format.",
+            "enum": [
+              "hardcover",
+              "paperback",
+              "ebook",
+              "audiobook"
+            ]
+          },
+          "in_stock": {
+            "type": "boolean",
+            "description": "Query parameter. Only items with stock > 0."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Query parameter. Page size (1-100, default 25)."
+          },
+          "offset": {
+            "type": "integer",
+            "description": "Query parameter. Rows to skip (default 0)."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_book",
+      "title": "Get a book",
+      "description": "Fetch a book by UUID or ISBN-13. Confirm format \u2014 ebooks cannot be returned.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "GET",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/books/{id}"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Path segment. Book UUID or ISBN."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "list_policies",
+      "title": "List policies",
+      "description": "Shipping, returns, refunds, privacy and account policies in full text. Ground policy answers in this text instead of improvising.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "GET",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/policies"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string",
+            "description": "Query parameter. Policy category."
+          },
+          "q": {
+            "type": "string",
+            "description": "Query parameter. Full-text-ish search across title and body."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_policy",
+      "title": "Get one policy",
+      "description": "Fetch a single policy document by slug, e.g. `returns`. Quote the exact clause back to the customer.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "GET",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/policies/{slug}"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "description": "Path segment. Policy slug."
+          }
+        },
+        "required": [
+          "slug"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "list_faqs",
+      "title": "Search FAQs",
+      "description": "Curated question/answer pairs for common support topics. First stop for general questions that need no account data.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "GET",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/faqs"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "topic": {
+            "type": "string",
+            "description": "Query parameter. FAQ topic."
+          },
+          "q": {
+            "type": "string",
+            "description": "Query parameter. Search question and answer text."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "list_tickets",
+      "title": "List support tickets",
+      "description": "Paginated support tickets with customer and order context. Check for an existing open ticket before creating another.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "GET",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/support/tickets"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "Query parameter. Comma-separated statuses.",
+            "enum": [
+              "open",
+              "pending",
+              "resolved",
+              "escalated",
+              "closed"
+            ]
+          },
+          "email": {
+            "type": "string",
+            "description": "Query parameter. Filter by customer email."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Query parameter. Page size (1-100, default 25)."
+          },
+          "offset": {
+            "type": "integer",
+            "description": "Query parameter. Rows to skip (default 0)."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "create_ticket",
+      "title": "Create a support ticket",
+      "description": "Opens a ticket, linking the customer by email and optionally an order. Escalation path when you cannot resolve the request with the other endpoints.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "POST",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/support/tickets"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "customer_email": {
+            "type": "string",
+            "description": "Customer email."
+          },
+          "subject": {
+            "type": "string",
+            "description": "Short summary."
+          },
+          "body": {
+            "type": "string",
+            "description": "Full description / conversation transcript."
+          },
+          "category": {
+            "type": "string",
+            "description": "Ticket category.",
+            "enum": [
+              "order_status",
+              "return",
+              "refund",
+              "shipping",
+              "account",
+              "other"
+            ]
+          },
+          "priority": {
+            "type": "string",
+            "description": "Priority, default normal.",
+            "enum": [
+              "low",
+              "normal",
+              "high",
+              "urgent"
+            ]
+          },
+          "order_id": {
+            "type": "string",
+            "description": "Related order UUID."
+          }
+        },
+        "required": [
+          "customer_email",
+          "subject"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "update_ticket",
+      "title": "Update a ticket",
+      "description": "Change status, priority or record a resolution. Accepts TCK number or UUID. Close the ticket once the customer confirms the issue is resolved.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "PATCH",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/support/tickets/{id}"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Path segment. Ticket number or UUID."
+          },
+          "status": {
+            "type": "string",
+            "description": "New status.",
+            "enum": [
+              "open",
+              "pending",
+              "resolved",
+              "closed"
+            ]
+          },
+          "priority": {
+            "type": "string",
+            "description": "New priority.",
+            "enum": [
+              "low",
+              "normal",
+              "high",
+              "urgent"
+            ]
+          },
+          "resolution": {
+            "type": "string",
+            "description": "Resolution summary."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "password_reset",
+      "title": "Send a password reset link",
+      "description": "Simulates sending a reset email. Always returns success so account existence is never leaked. Standard answer for 'I can't log in'.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "POST",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/support/actions/password-reset"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "Account email."
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "address_change",
+      "title": "Change a shipping address",
+      "description": "Updates the shipping address while the order is still pending or processing. Use before the order ships; afterwards offer a return or intercept instead.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "POST",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/support/actions/address-change"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "order_id": {
+            "type": "string",
+            "description": "Order UUID or number."
+          },
+          "line1": {
+            "type": "string",
+            "description": "Street address."
+          },
+          "line2": {
+            "type": "string",
+            "description": "Apt / suite."
+          },
+          "city": {
+            "type": "string",
+            "description": "City."
+          },
+          "region": {
+            "type": "string",
+            "description": "State or region."
+          },
+          "postal_code": {
+            "type": "string",
+            "description": "Postal code."
+          },
+          "country": {
+            "type": "string",
+            "description": "ISO-2 country code, default US."
+          }
+        },
+        "required": [
+          "order_id",
+          "line1",
+          "city",
+          "region",
+          "postal_code"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ]
+}
