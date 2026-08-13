@@ -360,7 +360,7 @@
     {
       "name": "create_return",
       "title": "Create a return (RMA)",
-      "description": "Creates an RMA with a prepaid label and computes the expected refund. Rejects with 409 when the order is not eligible unless `override_eligibility` is true. Call after eligibility passes; pass order_item_id values from the order items endpoint.",
+      "description": "Creates an RMA with a prepaid label and computes the expected refund. Rejects with 409 when the order is not eligible unless `override_eligibility` is true. Call after eligibility passes. `items` is optional \u2014 omit it to return every line on the order, or match lines by order_item_id, isbn or title. Set initiate_refund to open the refund in the same call.",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -395,7 +395,7 @@
           },
           "items": {
             "type": "array",
-            "description": "Line items to return.",
+            "description": "Line items to return. Omit to return every item on the order.",
             "items": {
               "type": "object",
               "properties": {
@@ -403,17 +403,34 @@
                   "type": "string",
                   "description": "Order item UUID."
                 },
+                "isbn": {
+                  "type": "string",
+                  "description": "Match the line by ISBN instead of UUID."
+                },
+                "title": {
+                  "type": "string",
+                  "description": "Match the line by (partial) book title."
+                },
                 "quantity": {
                   "type": "integer",
-                  "description": "Units returned."
+                  "description": "Units returned; defaults to the full line quantity."
                 }
               },
-              "required": [
-                "order_item_id",
-                "quantity"
-              ],
               "additionalProperties": false
             }
+          },
+          "initiate_refund": {
+            "type": "string",
+            "description": "Open a refund with the RMA: `pending_return` parks the money until the book is received, `immediate` settles it now (loyalty / goodwill).",
+            "enum": [
+              "none",
+              "pending_return",
+              "immediate"
+            ]
+          },
+          "actor": {
+            "type": "string",
+            "description": "Who is acting, recorded on the refund timeline."
           },
           "override_eligibility": {
             "type": "boolean",
@@ -422,8 +439,7 @@
         },
         "required": [
           "order_id",
-          "reason",
-          "items"
+          "reason"
         ],
         "additionalProperties": false
       }
@@ -544,11 +560,19 @@
         "properties": {
           "status": {
             "type": "string",
-            "description": "Query parameter. Comma-separated refund statuses."
+            "description": "Query parameter. Comma-separated refund statuses.",
+            "enum": [
+              "pending",
+              "pending_return",
+              "processing",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ]
           },
           "order_id": {
             "type": "string",
-            "description": "Query parameter. Filter by order UUID."
+            "description": "Query parameter. Filter by order UUID or order number."
           },
           "limit": {
             "type": "integer",
@@ -598,9 +622,29 @@
             "type": "string",
             "description": "Link the refund to an existing return."
           },
+          "status": {
+            "type": "string",
+            "description": "Initial status. Default `succeeded` (money moves now). Use `pending_return` to promise a refund once the book is received.",
+            "enum": [
+              "pending",
+              "pending_return",
+              "processing",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ]
+          },
           "reason": {
             "type": "string",
             "description": "Reason recorded on the ledger."
+          },
+          "note": {
+            "type": "string",
+            "description": "Free-text note stored on the refund timeline."
+          },
+          "actor": {
+            "type": "string",
+            "description": "Who is acting (e.g. support_agent, ai_agent)."
           }
         },
         "required": [
@@ -628,6 +672,69 @@
           "id": {
             "type": "string",
             "description": "Path segment. Refund number or UUID."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "update_refund",
+      "title": "Update a refund status",
+      "description": "Moves a refund to any status. Settling (`succeeded`) writes the ledger transaction, applies store credit and flips the order to refunded once fully covered; cancelling or failing a settled refund writes a reversal. Every change appends to the refund timeline (`events`). Use to release a `pending_return` refund early for a loyal customer, or to cancel a refund the customer no longer wants.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "PATCH",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/refunds/{id}"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Path segment. Refund number or UUID."
+          },
+          "status": {
+            "type": "string",
+            "description": "Target status.",
+            "enum": [
+              "pending",
+              "pending_return",
+              "processing",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "amount_cents": {
+            "type": "integer",
+            "description": "Adjust the amount (only before it settles)."
+          },
+          "method": {
+            "type": "string",
+            "description": "Switch payout method.",
+            "enum": [
+              "original_payment",
+              "store_credit"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "description": "Updated reason."
+          },
+          "note": {
+            "type": "string",
+            "description": "Why the decision was made \u2014 shown on the timeline."
+          },
+          "actor": {
+            "type": "string",
+            "description": "Who is acting."
           }
         },
         "required": [

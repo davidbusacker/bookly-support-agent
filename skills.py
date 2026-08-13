@@ -1,0 +1,102 @@
+"""
+Thin skills — executable helpers referenced by AOPs. Not business policy.
+
+Policy lives in aops/*.md; skills only do deterministic checks the LLM cannot safely do alone.
+"""
+
+import re
+from typing import Any, Callable
+
+
+def phone_last_four(phone: str | None) -> str | None:
+    if not phone:
+        return None
+    digits = re.sub(r"\D", "", phone)
+    return digits[-4:] if len(digits) >= 4 else None
+
+
+def verify_phone_last_four(
+    bookly_execute: Callable,
+    *,
+    last_four: str,
+    order_id: str | None = None,
+    email: str | None = None,
+) -> dict[str, Any]:
+    """
+    Skill: compare customer-provided last 4 digits to phone on file.
+    Returns verified true/false only — never exposes account data.
+    """
+    last_four_clean = re.sub(r"\D", "", last_four)[-4:]
+    if len(last_four_clean) != 4:
+        return {"ok": True, "verified": False, "message": "Need exactly 4 digits."}
+
+    if not order_id and not email:
+        return {"ok": True, "verified": False, "message": "Need order_id or email."}
+
+    phone_on_file: str | None = None
+
+    if order_id:
+        result = bookly_execute("get_order", {"id": order_id})
+        if not result.get("ok"):
+            return {"ok": True, "verified": False, "message": "Order not found."}
+        phone_on_file = (result.get("data", {}).get("customer") or {}).get("phone")
+
+    elif email:
+        result = bookly_execute("list_customers", {"email": email})
+        if not result.get("ok") or not result.get("data"):
+            return {"ok": True, "verified": False, "message": "Account not found."}
+        phone_on_file = result["data"][0].get("phone")
+
+    expected = phone_last_four(phone_on_file)
+    if not expected:
+        return {"ok": True, "verified": False, "message": "No phone on file."}
+
+    if last_four_clean != expected:
+        return {"ok": True, "verified": False, "message": "Digits do not match."}
+
+    return {"ok": True, "verified": True, "message": "Verified."}
+
+
+READ_AOP_TOOL: dict[str, Any] = {
+    "name": "read_aop",
+    "description": (
+        "Load a Bookly Agent Operating Policy (AOP) — internal instructions for how to handle "
+        "a situation. Call before identity, return/refund, or loyalty decisions."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "policy_id": {
+                "type": "string",
+                "enum": [
+                    "core",
+                    "conversation-style",
+                    "identity-verification",
+                    "returns-and-refunds",
+                    "loyalty-early-refund",
+                ],
+                "description": "Which AOP to load.",
+            }
+        },
+        "required": ["policy_id"],
+        "additionalProperties": False,
+    },
+}
+
+VERIFY_PHONE_TOOL: dict[str, Any] = {
+    "name": "verify_phone_last_four",
+    "description": (
+        "Skill referenced by identity-verification AOP. Checks last 4 phone digits against "
+        "the account on file. Returns verified true/false only."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "order_id": {"type": "string", "description": "Bookly order number, e.g. BK-10001."},
+            "email": {"type": "string", "description": "Customer email."},
+            "last_four": {"type": "string", "description": "Last 4 digits of phone on file."},
+        },
+        "required": ["last_four"],
+        "additionalProperties": False,
+    },
+}

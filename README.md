@@ -1,60 +1,48 @@
 # Bookly Support Agent
 
-Conversational customer support agent for **Bookly**, wired to the live
-[Bookly Support API](https://bookly-agent-api.lovable.app) on Lovable.
+Conversational support agent for **Bookly**, built in a **Decagon-style AOP architecture**.
 
 ## Architecture
 
 ```
-Browser (chat + mic)
-  → POST /api/chat   Claude tool-use loop (33 tools from MCP manifest)
-  → Bookly API      https://bookly-agent-api.lovable.app/api/public/v1/...
-  → POST /api/tts    ElevenLabs text-to-speech
+aops/*.md              Agent Operating Policies (behavior — edit these)
+  ↓ read at startup / via read_aop skill
+Claude (Riley)         Reasons over policies + customer context
+  ↓ tool calls
+Bookly MCP API         Orders, returns, refunds (live Lovable backend)
+  ↓
+skills.py              Thin helpers only (verify_phone, read_aop dispatch)
+bookly_client.py       HTTP execution of manifest tools
+app.py                 Flask server + orchestration loop + TTS
 ```
 
-Claude calls real read/write endpoints (orders, returns, refunds, policies,
-tickets, etc.) via the MCP-style manifest at `/api/public/tools.json`.
+**Business rules live in markdown, not Python.** Change loyalty, verification, or tone by editing `aops/`.
+
+## Agent Operating Policies
+
+| AOP | Purpose |
+|-----|---------|
+| `aops/core.md` | Role, tool discipline |
+| `aops/conversation-style.md` | Tone, progressive disclosure |
+| `aops/identity-verification.md` | Phone last-4 before account data |
+| `aops/returns-and-refunds.md` | Standard return flow |
+| `aops/loyalty-early-refund.md` | 3-order early refund — agent reads, counts orders, decides |
+
+## Skills (minimal code)
+
+| Skill | Purpose |
+|-------|---------|
+| `read_aop` | Load full policy text on demand |
+| `verify_phone_last_four` | Pass/fail phone check (referenced by identity AOP) |
+| 33× Bookly tools | From [tools.json](https://bookly-agent-api.lovable.app/api/public/tools.json) |
 
 ## Quick start
 
 ```bash
-chmod +x run.sh
 ./run.sh
 ```
 
-Open **http://127.0.0.1:5000** in **Chrome** for voice.
-
-## API integration
-
-| Resource | URL |
-|----------|-----|
-| Tool manifest | https://bookly-agent-api.lovable.app/api/public/tools.json |
-| OpenAPI | https://bookly-agent-api.lovable.app/api/public/openapi.json |
-| LLM overview | https://bookly-agent-api.lovable.app/llms.txt |
-
-Tools are loaded from `BOOKLY_MANIFEST_URL` at startup (cached in `data/bookly_tools.json`).
-
-## Demo flows (live data)
-
-| Flow | Example |
-|------|---------|
-| Order status | "What's the status of order BK-10001?" |
-| Lookup by email | "Find orders for priya.nair@example.com" |
-| Return | "I want to return BK-10003, it arrived damaged" |
-| Policy | "What's your return policy?" |
-| Password reset | "I can't log in — email is ava.brooks@example.com" |
-
-Call `GET /api/public/v1/meta` for fresh sample IDs.
-
-## Files
-
-| File | Purpose |
-|------|---------|
-| `app.py` | Flask + Claude orchestration loop |
-| `bookly_client.py` | Manifest loader + HTTP tool executor |
-| `tools.py` | Thin wrapper exposing tools to the agent |
-| `data/bookly_tools.json` | Cached MCP manifest |
-| `templates/index.html` | Chat + voice UI |
+Open **http://127.0.0.1:5000** in Chrome for voice.
 
 ## License
 
