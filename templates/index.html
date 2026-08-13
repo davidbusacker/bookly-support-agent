@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bookly Support</title>
+<style>
+  /* Bookstore-inspired palette */
+  :root {
+    --paper: #f4efe4;
+    --paper-dim: #e9e1d0;
+    --ink: #21262e;
+    --spine: #7a3030;
+    --spine-dim: #a85c5c;
+    --agent-bg: #21262e;
+    --agent-text: #f4efe4;
+    --user-bg: #ffffff;
+    --user-text: #21262e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    display: flex;
+    justify-content: center;
+    min-height: 100vh;
+  }
+  .app {
+    width: 100%;
+    max-width: 640px;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+  }
+  header {
+    padding: 22px 24px 16px;
+    border-bottom: 1px solid var(--paper-dim);
+  }
+  header .brand {
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 26px;
+    font-weight: 700;
+    color: var(--spine);
+    letter-spacing: 0.3px;
+  }
+  header .sub {
+    font-size: 13px;
+    color: #6b6558;
+    margin-top: 2px;
+  }
+  #statusBar {
+    font-size: 12px;
+    color: #6b6558;
+    padding: 0 20px 8px;
+  }
+  #log {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .msg {
+    max-width: 78%;
+    padding: 10px 14px;
+    border-radius: 4px;
+    font-size: 14.5px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+  }
+  .msg.agent {
+    align-self: flex-start;
+    background: var(--agent-bg);
+    color: var(--agent-text);
+    border-left: 3px solid var(--spine-dim);
+  }
+  .msg.user {
+    align-self: flex-end;
+    background: var(--user-bg);
+    color: var(--user-text);
+    border: 1px solid var(--paper-dim);
+  }
+  .msg.error {
+    align-self: center;
+    background: #fbe6e6;
+    color: #7a3030;
+    font-size: 13px;
+  }
+  .typing {
+    align-self: flex-start;
+    color: #6b6558;
+    font-size: 13px;
+    font-style: italic;
+    padding-left: 14px;
+  }
+  form#composer {
+    display: flex;
+    gap: 8px;
+    padding: 16px 20px 20px;
+    border-top: 1px solid var(--paper-dim);
+  }
+  #textInput {
+    flex: 1;
+    padding: 12px 14px;
+    border-radius: 4px;
+    border: 1px solid var(--paper-dim);
+    background: #fff;
+    font-size: 14.5px;
+    outline: none;
+  }
+  #textInput:focus { border-color: var(--spine-dim); }
+  button {
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    padding: 0 16px;
+  }
+  #sendBtn { background: var(--spine); color: #fff; }
+  #sendBtn:hover { background: #632626; }
+  #sendBtn:disabled { opacity: 0.6; cursor: not-allowed; }
+  #micBtn {
+    background: var(--paper-dim);
+    color: var(--ink);
+    width: 44px;
+    padding: 0;
+  }
+  #micBtn.listening {
+    background: var(--spine);
+    color: #fff;
+    animation: pulse 1s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+  }
+  #voiceToggleWrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12.5px;
+    color: #6b6558;
+    padding: 0 20px 10px;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand">Bookly Support</div>
+    <div class="sub">Order status &middot; returns &middot; shipping &amp; account help</div>
+  </header>
+
+  <div id="statusBar">Checking connection…</div>
+
+  <div id="voiceToggleWrap">
+    <input type="checkbox" id="voiceToggle" checked>
+    <label for="voiceToggle">Speak responses aloud (ElevenLabs TTS)</label>
+  </div>
+
+  <div id="log"></div>
+
+  <form id="composer">
+    <button type="button" id="micBtn" title="Hold to speak (Chrome)">🎤</button>
+    <input type="text" id="textInput" placeholder="Ask about an order, a return, or shipping..." autocomplete="off">
+    <button type="submit" id="sendBtn">Send</button>
+  </form>
+</div>
+
+<script>
+// --- DOM refs ----------------------------------------------------------------
+let sessionId = null;
+let isSending = false;
+let currentAudio = null; // track TTS playback so we can stop overlapping audio
+
+const log = document.getElementById('log');
+const textInput = document.getElementById('textInput');
+const composer = document.getElementById('composer');
+const micBtn = document.getElementById('micBtn');
+const sendBtn = document.getElementById('sendBtn');
+const voiceToggle = document.getElementById('voiceToggle');
+const statusBar = document.getElementById('statusBar');
+
+// --- Chat UI helpers ---------------------------------------------------------
+
+function addMessage(role, text) {
+  const div = document.createElement('div');
+  div.className = 'msg ' + role;
+  div.textContent = text;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+  return div;
+}
+
+function addTyping() {
+  const div = document.createElement('div');
+  div.className = 'typing';
+  div.id = 'typingIndicator';
+  div.textContent = 'Riley is thinking…';
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+}
+
+function removeTyping() {
+  const el = document.getElementById('typingIndicator');
+  if (el) el.remove();
+}
+
+function setSending(active) {
+  isSending = active;
+  sendBtn.disabled = active;
+  textInput.disabled = active;
+}
+
+// --- Session + messaging -----------------------------------------------------
+
+async function initSession() {
+  const res = await fetch('/api/session', { method: 'POST' });
+  const data = await res.json();
+  sessionId = data.session_id;
+
+  const greeting =
+    "Hi, I'm Riley from Bookly support. I can help with order status, returns, " +
+    "or shipping and account questions — what's going on?";
+  addMessage('agent', greeting);
+
+  // Speak the greeting if voice is enabled (voice-first demo)
+  if (voiceToggle.checked) speak(greeting);
+}
+
+async function sendMessage(text) {
+  const trimmed = text.trim();
+  if (!trimmed || isSending) return;
+
+  setSending(true);
+  addMessage('user', trimmed);
+  addTyping();
+
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId, message: trimmed }),
+    });
+    const data = await res.json();
+    removeTyping();
+
+    if (data.error) {
+      addMessage('error', 'Error: ' + data.error);
+      return;
+    }
+
+    addMessage('agent', data.reply);
+    if (voiceToggle.checked) speak(data.reply);
+  } catch (err) {
+    removeTyping();
+    addMessage('error', 'Network error: ' + err.message);
+  } finally {
+    setSending(false);
+    textInput.focus();
+  }
+}
+
+// --- ElevenLabs TTS (voice out) ----------------------------------------------
+
+async function speak(text) {
+  try {
+    // Stop any in-progress audio before starting new speech
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio = null;
+    }
+
+    const res = await fetch('/api/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+
+    if (!res.ok) {
+      console.warn('TTS failed:', await res.text());
+      return;
+    }
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    currentAudio = new Audio(url);
+    currentAudio.onended = () => URL.revokeObjectURL(url);
+    await currentAudio.play();
+  } catch (err) {
+    console.warn('TTS playback failed', err);
+  }
+}
+
+// --- Text input --------------------------------------------------------------
+
+composer.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const text = textInput.value.trim();
+  if (!text) return;
+  textInput.value = '';
+  sendMessage(text);
+});
+
+// --- Web Speech API STT (voice in) — Chrome supports this on localhost ------
+
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+if (SpeechRecognition) {
+  const recognition = new SpeechRecognition();
+  recognition.lang = 'en-US';
+  recognition.interimResults = false;
+  recognition.continuous = false;
+
+  let micActive = false;
+
+  micBtn.addEventListener('click', () => {
+    if (isSending) return;
+
+    if (micActive) {
+      // Click again to stop early
+      recognition.stop();
+      return;
+    }
+
+    // Stop TTS if user starts speaking
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio = null;
+    }
+
+    try {
+      recognition.start();
+    } catch (err) {
+      console.warn('Could not start speech recognition', err);
+    }
+  });
+
+  recognition.onstart = () => {
+    micActive = true;
+    micBtn.classList.add('listening');
+    micBtn.title = 'Listening… click to stop';
+  };
+
+  recognition.onresult = (event) => {
+    const transcript = event.results[0][0].transcript.trim();
+    if (transcript) {
+      textInput.value = transcript;
+      // Voice-first: auto-send after STT so user doesn't need to click Send
+      sendMessage(transcript);
+      textInput.value = '';
+    }
+  };
+
+  recognition.onend = () => {
+    micActive = false;
+    micBtn.classList.remove('listening');
+    micBtn.title = 'Click to speak (Chrome)';
+  };
+
+  recognition.onerror = (event) => {
+    micActive = false;
+    micBtn.classList.remove('listening');
+    if (event.error !== 'aborted') {
+      addMessage('error', 'Mic error: ' + event.error + ' (use Chrome on localhost)');
+    }
+  };
+} else {
+  micBtn.disabled = true;
+  micBtn.title = 'Speech recognition requires Chrome';
+}
+
+// --- Health check on load ----------------------------------------------------
+
+async function checkHealth() {
+  try {
+    const res = await fetch('/api/health');
+    const data = await res.json();
+    const parts = [];
+    if (data.anthropic_configured) parts.push('Claude ready');
+    else parts.push('Claude key missing');
+    if (data.elevenlabs_configured) parts.push('ElevenLabs ready');
+    else parts.push('ElevenLabs key missing');
+    statusBar.textContent = parts.join(' · ') + ' · Mic: ' + (SpeechRecognition ? 'Chrome STT' : 'unavailable');
+  } catch {
+    statusBar.textContent = 'Server offline — run ./run.sh';
+  }
+}
+
+checkHealth();
+initSession();
+</script>
+</body>
+</html>

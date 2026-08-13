@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Start the Bookly support agent locally.
+# Open http://127.0.0.1:5000 in Chrome for full voice support.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -16,6 +18,6 @@ if [ -f .env ]; then
   set +a
 fi
 
-echo "Starting Bookly Support Agent at http://127.0.0.1:8000"
-echo "LLM mode: ${OPENAI_API_KEY:+openai}${OPENAI_API_KEY:-mock (set OPENAI_API_KEY in .env for live LLM)}"
-exec uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+echo "Bookly Support Agent → http://127.0.0.1:5000"
+echo "Use Chrome for mic (Web Speech API). Toggle voice replies in the UI."
+exec python app.py
