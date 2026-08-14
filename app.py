@@ -18,7 +18,7 @@ import anthropic
 from elevenlabs import ElevenLabs, VoiceSettings
 
 from aop_loader import build_system_prompt
-from intent import IntentResult, build_clarification_reply, classify_intent
+from intent import IntentResult, build_clarification_reply, classify_intent, message_plain_text
 from resolution import (
     CONFIRM_QUESTION,
     ConfirmResult,
@@ -96,6 +96,8 @@ class Session:
     awaiting_resolution_confirm: bool = False
     resolution_confirmed: bool = False
     restock_offered: bool = False
+    authenticated: bool = False
+    auth_subject: str | None = None  # order id or email that passed last-4
 
 
 SESSIONS: dict[str, Session] = {}
@@ -105,16 +107,63 @@ def _ndjson(payload: dict[str, Any]) -> str:
     return json.dumps(payload, default=str) + "\n"
 
 
+# Short titles for the live "Peek into the agent" demo panel.
+TOOL_PEEK_TITLES: dict[str, str] = {
+    "read_aop": "Reading a policy",
+    "verify_phone_last_four": "Verifying phone (last 4)",
+    "get_order": "Looking up the order",
+    "list_orders": "Listing past orders",
+    "list_customers": "Looking up the customer",
+    "get_customer": "Looking up the customer",
+    "list_books": "Checking inventory",
+    "get_book": "Looking up a title",
+    "create_return": "Opening a return",
+    "create_refund": "Issuing a refund",
+    "update_refund": "Updating a refund",
+    "cancel_order": "Cancelling the order",
+    "cancel_return": "Cancelling a return",
+    "create_ticket": "Escalating to a ticket",
+    "list_agent_traces": "Reading prior conversations",
+    "get_agent_trace": "Reading a prior conversation",
+    "list_policies": "Checking store policy",
+    "get_policy": "Checking store policy",
+    "list_faqs": "Checking FAQs",
+    "list_tickets": "Checking open tickets",
+    "reship_order": "Arranging a reship",
+    "address_change": "Updating the address",
+    "password_reset": "Starting a password reset",
+    "receive_return": "Marking a return received",
+}
+
+
+def _peek(text: str) -> str:
+    """NDJSON status line for the live agent peek panel."""
+    return _ndjson({"type": "status", "text": text})
+
+
+def _tool_peek_title(name: str) -> str:
+    return TOOL_PEEK_TITLES.get(name, f"Using {name.replace('_', ' ')}")
+
+
 def _system_prompt(session: Session) -> str:
     parts = [BASE_SYSTEM_PROMPT]
     if session.caller_history:
         parts.append(session.caller_history)
+    auth_line = (
+        f"Authenticated: **yes** (subject `{session.auth_subject}`)"
+        if session.authenticated
+        else "Authenticated: **no** — account tools are blocked until verify_phone_last_four succeeds"
+    )
+    caller_bits = ["\n## Current caller", auth_line]
     if session.customer_email:
-        parts.append(
-            f"\n## Current caller\nEmail: `{session.customer_email}`"
-            + (f"\nOrder in context: `{session.order_id}`" if session.order_id else "")
-            + "\nUse `list_agent_traces` with this email if you need more prior conversation detail."
-        )
+        caller_bits.insert(1, f"Email: `{session.customer_email}`")
+    if session.order_id:
+        caller_bits.insert(1 if not session.customer_email else 2, f"Order in context: `{session.order_id}`")
+    caller_bits.append(
+        "Public tools (policies, FAQs, catalog) work without auth. "
+        "Order/customer/refund tools hard-fail until authenticated."
+    )
+    parts.append("\n".join(caller_bits))
     return "\n".join(parts)
 
 
@@ -129,6 +178,14 @@ def _update_caller_identity(session: Session, user_message: str) -> bool:
     if order_id and order_id != session.order_id:
         session.order_id = order_id
         changed = True
+    # Switching lookup subject invalidates prior phone verification.
+    if session.authenticated and session.auth_subject:
+        subject = session.auth_subject.lower()
+        order_match = session.order_id and session.order_id.lower() == subject
+        email_match = session.customer_email and session.customer_email.lower() == subject
+        if not order_match and not email_match:
+            session.authenticated = False
+            session.auth_subject = None
     return changed
 
 
@@ -136,17 +193,8 @@ def _conversation_text(history: list, limit: int = 12) -> str:
     lines: list[str] = []
     for msg in history[-limit:]:
         role = msg.get("role", "")
-        content = msg.get("content", "")
-        if isinstance(content, list):
-            text = " ".join(
-                getattr(block, "text", "") or (block.get("text", "") if isinstance(block, dict) else "")
-                for block in content
-                if getattr(block, "type", None) == "text"
-                or (isinstance(block, dict) and block.get("type") == "text")
-            )
-        else:
-            text = str(content)
-        if text.strip() and role in ("user", "assistant"):
+        text = message_plain_text(msg.get("content")).strip()
+        if text and role in ("user", "assistant"):
             lines.append(f"{role}: {text[:400]}")
     return "\n".join(lines)
 
@@ -221,6 +269,12 @@ def _maybe_restock_offer(session: Session) -> dict[str, Any] | None:
     convo = _conversation_text(session.messages)
     trace_blob = traces_search_blob(traces)
     if not looks_like_availability_interest(convo, trace_blob, session.caller_history):
+        logging.info(
+            "Restock skipped: no availability language (email=%s order=%s traces=%s)",
+            session.customer_email,
+            session.order_id,
+            len(traces),
+        )
         return None
 
     inventory = fetch_inventory(execute_tool)
@@ -232,8 +286,21 @@ def _maybe_restock_offer(session: Session) -> dict[str, Any] | None:
         inventory=inventory,
     )
     if not offer:
+        logging.info(
+            "Restock: no inventory match (email=%s order=%s traces=%s books=%s)",
+            session.customer_email,
+            session.order_id,
+            len(traces),
+            len(inventory),
+        )
         return None
     session.restock_offered = True
+    logging.info(
+        "Restock offer: %s by %s (email=%s)",
+        offer.title,
+        offer.author,
+        session.customer_email,
+    )
     return offer.as_dict()
 
 
@@ -255,11 +322,12 @@ def _refresh_caller_history(session: Session, *, force: bool = False) -> None:
 
 def _maybe_update_identity_from_tool(session: Session, tool_name: str, result: dict[str, Any]) -> None:
     patch = result.pop("_session", None) if isinstance(result, dict) else None
-    if not result.get("ok"):
-        return
-    data = result.get("data")
     changed = False
     if isinstance(patch, dict):
+        if patch.get("authenticated"):
+            session.authenticated = True
+            if patch.get("auth_subject"):
+                session.auth_subject = str(patch["auth_subject"])
         email = patch.get("customer_email")
         if email and str(email).lower() != session.customer_email:
             session.customer_email = str(email).lower()
@@ -268,6 +336,13 @@ def _maybe_update_identity_from_tool(session: Session, tool_name: str, result: d
         if order_id and order_id != session.order_id:
             session.order_id = str(order_id)
             changed = True
+
+    if not result.get("ok"):
+        if changed:
+            _refresh_caller_history(session, force=True)
+        return
+
+    data = result.get("data")
     if isinstance(data, dict):
         customer = data.get("customer") or {}
         if customer.get("email") and customer["email"].lower() != session.customer_email:
@@ -393,9 +468,18 @@ def run_agent_turn(
             for block in response.content:
                 if getattr(block, "type", None) != "tool_use":
                     continue
-                yield {"type": "status", "text": f"Using {block.name}…"}
-                result = execute_tool(block.name, block.input, session_id=session_id)
+                yield {"type": "status", "text": _tool_peek_title(block.name)}
+                result = execute_tool(
+                    block.name,
+                    block.input,
+                    session_id=session_id,
+                    authenticated=session.authenticated,
+                )
+                if result.get("error") == "authentication_required":
+                    yield {"type": "status", "text": f"Blocked {block.name} — not authenticated"}
                 _maybe_update_identity_from_tool(session, block.name, result)
+                if block.name == "verify_phone_last_four" and result.get("verified"):
+                    yield {"type": "status", "text": "Authenticated"}
                 tools_used.append(block.name)
                 tool_traces.append(
                     trace_message(
@@ -496,7 +580,7 @@ def chat():
 
 
 def _chat_events(session: Session, session_id: str, user_message: str):
-    yield _ndjson({"type": "status", "text": "Riley is thinking…"})
+    yield _peek("Classifying intent")
 
     intent_result = classify_intent(
         anthropic_client,
@@ -506,6 +590,10 @@ def _chat_events(session: Session, session_id: str, user_message: str):
     )
     session.last_intent = intent_result.intent
     session.last_confidence = intent_result.confidence
+    yield _peek(
+        f"Intent: {intent_result.intent.replace('_', ' ')} "
+        f"({intent_result.confidence:.0%})"
+    )
 
     subject = user_message[:80] + ("…" if len(user_message) > 80 else "")
     turn_messages = [
@@ -524,8 +612,10 @@ def _chat_events(session: Session, session_id: str, user_message: str):
     ]
 
     if not session.trace_id:
+        yield _peek("Starting Bookly agent trace")
         _ensure_trace(session, session_id, subject=subject, intent=intent_result, first_messages=turn_messages)
     else:
+        yield _peek("Logging turn to Bookly")
         _sync_trace(session, turn_messages)
 
     had_prior_reply = any(m.get("role") == "assistant" for m in session.messages)
@@ -536,6 +626,7 @@ def _chat_events(session: Session, session_id: str, user_message: str):
     )
     if try_closeout:
         session.awaiting_resolution_confirm = False
+        yield _peek("Checking if they're done")
         confirm = classify_resolution_confirm(
             anthropic_client,
             model=CLASSIFIER_MODEL,
@@ -546,11 +637,13 @@ def _chat_events(session: Session, session_id: str, user_message: str):
             return
 
     if intent_result.needs_clarification:
+        yield _peek("Intent unclear — asking a clarifying question")
         reply_text = build_clarification_reply(
             anthropic_client,
             model=CLASSIFIER_MODEL,
             user_message=user_message,
             intent=intent_result,
+            history=session.messages,
         )
         session.messages.append({"role": "user", "content": user_message})
         session.messages.append({"role": "assistant", "content": reply_text})
@@ -580,6 +673,7 @@ def _chat_events(session: Session, session_id: str, user_message: str):
         return
 
     session.messages.append({"role": "user", "content": user_message})
+    yield _peek("Riley is reasoning")
 
     reply_text = ""
     tools_used: list[str] = []
@@ -601,8 +695,25 @@ def _chat_events(session: Session, session_id: str, user_message: str):
         yield _ndjson({"type": "error", "error": str(exc)})
         return
 
+    restock_payload = None
+    if looks_like_customer_done(user_message) and not session.restock_offered:
+        # They already wrapped up this turn — don't wait for a second "I'm good."
+        yield _peek("Customer said they're done — checking restock")
+        restock_payload = _maybe_restock_offer(session)
+        if restock_payload:
+            yield _peek(f"Restock match: {restock_payload['title']}")
+            extra = f" {restock_payload['solicitation']}"
+            reply_text = f"{reply_text.rstrip()}{extra}"
+            yield _ndjson({"type": "delta", "text": extra})
+            session.resolution_confirmed = True
+        else:
+            yield _peek("No restock match")
+
     resolution_payload = None
-    if should_score_resolution(reply_text=reply_text, tools_this_turn=tools_used):
+    if restock_payload is None and should_score_resolution(
+        reply_text=reply_text, tools_this_turn=tools_used
+    ):
+        yield _peek("Scoring resolution")
         resolution = score_resolution(
             anthropic_client,
             model=CLASSIFIER_MODEL,
@@ -611,21 +722,36 @@ def _chat_events(session: Session, session_id: str, user_message: str):
         )
         session.last_resolution = resolution.score
         resolution_payload = resolution.as_dict()
+        yield _peek(f"Resolution {resolution.score:.0%}")
         if (
             resolution.score >= RESOLUTION_THRESHOLD
             and not session.restock_offered
             and not session.resolution_confirmed
             and not session.awaiting_resolution_confirm
+            and not looks_like_customer_done(user_message)
         ):
+            yield _peek("Asking if everything is resolved")
             extra = f" {CONFIRM_QUESTION}"
             reply_text = f"{reply_text.rstrip()}{extra}"
             yield _ndjson({"type": "delta", "text": extra})
             session.awaiting_resolution_confirm = True
-    else:
+    elif restock_payload is None:
         session.last_resolution = None
 
     end_notes = list(tool_traces)
     end_notes.append(trace_message(role="agent", speaker="Riley", content=reply_text))
+    if restock_payload:
+        end_notes.append(
+            trace_message(
+                role="note",
+                speaker="System",
+                content=(
+                    f"Customer already said they're done — restock offer: "
+                    f"{restock_payload['title']} by {restock_payload['author']}"
+                ),
+                metadata={"restock_offer": restock_payload, "resolution_confirmed": True},
+            )
+        )
     if resolution_payload:
         end_notes.append(
             trace_message(
@@ -652,6 +778,7 @@ def _chat_events(session: Session, session_id: str, user_message: str):
             "last_intent": intent_result.intent,
             "last_confidence": intent_result.confidence,
             "resolution_score": session.last_resolution,
+            "restock_offer": restock_payload,
         },
     )
 
@@ -661,7 +788,12 @@ def _chat_events(session: Session, session_id: str, user_message: str):
             "reply": reply_text,
             "intent": intent_result.as_dict(),
             "resolution": resolution_payload,
-            "guardrail": "resolution_confirm" if session.awaiting_resolution_confirm else None,
+            "restock_offer": restock_payload,
+            "guardrail": (
+                "restock_offer"
+                if restock_payload
+                else "resolution_confirm" if session.awaiting_resolution_confirm else None
+            ),
             "trace_id": session.trace_id,
             "trace_number": session.trace_number,
             "customer_email": session.customer_email,
@@ -677,12 +809,14 @@ def _confirmed_resolution_events(
 ):
     session.resolution_confirmed = True
     session.messages.append({"role": "user", "content": user_message})
-    yield _ndjson({"type": "status", "text": "Checking inventory…"})
+    yield _peek("Customer confirmed — checking prior traces & inventory")
     restock = _maybe_restock_offer(session)
     if restock:
+        yield _peek(f"Restock match: {restock['title']}")
         reply_text = restock["solicitation"]
         note = f"Customer confirmed resolved — restock offer: {restock['title']} by {restock['author']}"
     else:
+        yield _peek("No restock match")
         reply_text = "Glad we got that sorted."
         note = "Customer confirmed resolved — no restock match in traces/inventory"
         session.restock_offered = True
@@ -747,4 +881,5 @@ def tts():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, host="127.0.0.1", port=5000, threaded=True)
+    # Avoid macOS AirPlay Receiver, which binds *:5000 and returns 403 in Chrome.
+    app.run(debug=True, host="127.0.0.1", port=5050, threaded=True)

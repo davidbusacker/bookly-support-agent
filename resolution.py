@@ -13,6 +13,8 @@ from typing import Any
 
 import anthropic
 
+from intent import message_plain_text
+
 RESOLVE_TOOL: dict[str, Any] = {
     "name": "report_resolution",
     "description": "Score whether the customer's original request is fully taken care of.",
@@ -103,17 +105,8 @@ def _history_text(history: list | None, limit: int = 10) -> str:
     lines: list[str] = []
     for msg in history[-limit:]:
         role = msg.get("role", "")
-        content = msg.get("content", "")
-        if isinstance(content, list):
-            text = " ".join(
-                block.get("text", "") if isinstance(block, dict) else getattr(block, "text", "")
-                for block in content
-                if (isinstance(block, dict) and block.get("type") == "text")
-                or getattr(block, "type", None) == "text"
-            )
-        else:
-            text = str(content)
-        if text.strip() and role in ("user", "assistant"):
+        text = message_plain_text(msg.get("content")).strip()
+        if text and role in ("user", "assistant"):
             lines.append(f"{role}: {text[:400]}")
     return "\n".join(lines)
 

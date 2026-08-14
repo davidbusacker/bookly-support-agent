@@ -6,7 +6,7 @@ The system scores **resolution** after each turn. If resolution is **90%+**:
 
 1. Ask the customer: **"Did we resolve everything today?"**
 2. Wait. Do **not** pitch yet.
-3. If they already said they're done ("that's all", "I'm good", "nope") after you've helped, treat that as confirmation even if you never asked.
+3. If they already said they're done ("that's all", "that's everything", "I'm good") — even in the same message as the original ask — treat that as confirmation. Do not wait for another turn.
 4. Only if they confirm they're good:
    - Read this caller's recent **agent traces**.
    - Pull a **full inventory snapshot** (`list_books`).

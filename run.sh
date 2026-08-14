@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Start the Bookly support agent locally.
-# Open http://127.0.0.1:5000 in Chrome for full voice support.
+# Open http://127.0.0.1:5050 (port 5000 is taken by macOS AirPlay).
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -18,6 +18,5 @@ if [ -f .env ]; then
   set +a
 fi
 
-echo "Bookly Support Agent → http://127.0.0.1:5000"
-echo "Use Chrome for mic (Web Speech API). Toggle voice replies in the UI."
+echo "Bookly Support Agent → http://127.0.0.1:5050"
 exec python app.py

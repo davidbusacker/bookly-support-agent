@@ -69,8 +69,12 @@ def verify_phone_last_four(
         session_patch["order_id"] = order_number or order_id
 
     payload: dict[str, Any] = {"ok": True, "verified": True, "message": "Verified."}
-    if session_patch:
-        payload["_session"] = session_patch
+    session_patch["authenticated"] = True
+    if order_number or order_id:
+        session_patch["auth_subject"] = str(order_number or order_id)
+    elif found_email:
+        session_patch["auth_subject"] = str(found_email).lower()
+    payload["_session"] = session_patch
     return payload
 
 

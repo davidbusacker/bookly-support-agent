@@ -125,6 +125,7 @@ def traces_search_blob(traces: list[dict[str, Any]]) -> str:
         parts.append(str(trace.get("transcript_text") or ""))
         parts.append(str(trace.get("subject") or ""))
         parts.append(str(trace.get("summary") or ""))
+        parts.append(str(trace.get("intent") or ""))
         tags = trace.get("tags") or []
         if isinstance(tags, list):
             parts.extend(str(tag) for tag in tags)

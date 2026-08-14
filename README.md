@@ -38,7 +38,7 @@ app.py                 Flask server + orchestration loop + TTS
 | Skill | Purpose |
 |-------|---------|
 | `read_aop` | Load full policy text on demand |
-| `verify_phone_last_four` | Pass/fail phone check (referenced by identity AOP) |
+| `verify_phone_last_four` | Pass/fail phone check; sets session authenticated for tool ACL |
 | 33× Bookly tools | From [tools.json](https://bookly-agent-api.lovable.app/api/public/tools.json) |
 
 ## Quick start
