@@ -244,16 +244,67 @@ async function sendMessage(text) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ session_id: sessionId, message: trimmed }),
     });
-    const data = await res.json();
-    removeTyping();
 
-    if (data.error) {
-      addMessage('error', 'Error: ' + data.error);
+    const ctype = res.headers.get('content-type') || '';
+    if (ctype.includes('application/json') && !ctype.includes('ndjson')) {
+      const data = await res.json();
+      removeTyping();
+      if (data.error) {
+        addMessage('error', 'Error: ' + data.error);
+        return;
+      }
+      addMessage('agent', data.reply);
+      if (voiceToggle.checked) speak(data.reply);
       return;
     }
 
-    addMessage('agent', data.reply);
-    if (voiceToggle.checked) speak(data.reply);
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let agentDiv = null;
+    let full = '';
+
+    const ensureAgent = () => {
+      if (!agentDiv) {
+        removeTyping();
+        agentDiv = addMessage('agent', '');
+      }
+      return agentDiv;
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        const ev = JSON.parse(line);
+        if (ev.type === 'status') {
+          const el = document.getElementById('typingIndicator');
+          if (el) el.textContent = ev.text || 'Riley is typing…';
+        } else if (ev.type === 'delta') {
+          ensureAgent();
+          full += ev.text;
+          agentDiv.textContent = full;
+          log.scrollTop = log.scrollHeight;
+        } else if (ev.type === 'done') {
+          ensureAgent();
+          full = ev.reply || full;
+          agentDiv.textContent = full;
+          if (voiceToggle.checked && full) speak(full);
+        } else if (ev.type === 'error') {
+          removeTyping();
+          addMessage('error', 'Error: ' + ev.error);
+        }
+      }
+    }
+    if (!agentDiv && full) {
+      removeTyping();
+      addMessage('agent', full);
+    }
   } catch (err) {
     removeTyping();
     addMessage('error', 'Network error: ' + err.message);

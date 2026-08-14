@@ -9,7 +9,7 @@ from pathlib import Path
 AOPS_DIR = Path(__file__).resolve().parent / "aops"
 
 # Loaded into every session (keep small)
-STARTUP_AOPS = ("core", "conversation-style")
+STARTUP_AOPS = ("core", "conversation-style", "identity-verification")
 
 # Available via read_aop skill
 ALL_AOP_IDS = (
@@ -18,6 +18,7 @@ ALL_AOP_IDS = (
     "identity-verification",
     "returns-and-refunds",
     "loyalty-early-refund",
+    "restock-offer",
 )
 
 _AOP_FILES = {
@@ -26,6 +27,7 @@ _AOP_FILES = {
     "identity-verification": "identity-verification.md",
     "returns-and-refunds": "returns-and-refunds.md",
     "loyalty-early-refund": "loyalty-early-refund.md",
+    "restock-offer": "restock-offer.md",
 }
 
 

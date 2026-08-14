@@ -9,12 +9,32 @@ Skills: skills.py (verify_phone, read_aop)
 from aop_loader import read_aop
 from bookly_client import BooklyClient, tool_result_content
 from skills import READ_AOP_TOOL, VERIFY_PHONE_TOOL, verify_phone_last_four
+from trace_client import ORCHESTRATION_TRACE_TOOLS
 
 _client = BooklyClient.from_env()
 
-# 33 Bookly manifest tools + 2 local skills
-TOOLS_SCHEMA = _client.anthropic_tools() + [READ_AOP_TOOL, VERIFY_PHONE_TOOL]
 
+def get_bookly_client() -> BooklyClient:
+    return _client
+
+
+def reload_bookly_client() -> BooklyClient:
+    global _client, TOOLS_SCHEMA, BOOKLY_AGENT_INSTRUCTIONS
+    _client = BooklyClient.from_env()
+    TOOLS_SCHEMA = _build_tools_schema()
+    BOOKLY_AGENT_INSTRUCTIONS = _client.instructions
+    return _client
+
+
+def _build_tools_schema() -> list:
+    # Trace write tools are orchestrated by app.py; agent may read traces.
+    bookly_tools = [
+        t for t in _client.anthropic_tools() if t["name"] not in ORCHESTRATION_TRACE_TOOLS
+    ]
+    return bookly_tools + [READ_AOP_TOOL, VERIFY_PHONE_TOOL]
+
+
+TOOLS_SCHEMA = _build_tools_schema()
 BOOKLY_AGENT_INSTRUCTIONS = _client.instructions
 
 

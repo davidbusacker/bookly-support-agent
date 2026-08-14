@@ -3,7 +3,12 @@
   "name": "bookly-support",
   "title": "Bookly Support",
   "version": "1.0.0",
-  "instructions": "Tools for the Bookly bookstore support agent. Resolve the customer first (email or order number), check policy/eligibility before promising anything, and escalate with create_ticket when a request cannot be resolved.",
+  "instructions": "Tools for the Bookly bookstore support agent. Resolve the customer first (email or order number), check policy/eligibility before promising anything, and escalate with create_ticket when a request cannot be resolved.\nBefore you answer, search prior context with list_agent_traces and list_tickets so you never contradict an earlier decision.\n\n## Logging your conversations back to Bookly (required after every call)\n\nAfter you finish handling a customer, POST the whole conversation to `/api/public/v1/agent-traces`.\nBookly store staff review these traces to verify what you claimed you did, so log every turn and every tool call.\n\n**When to log**\n- Once, at the end of a conversation, with the complete `messages` array.\n- If the conversation is still running, POST with `status: \"in_progress\"` and append later turns with `POST /api/public/v1/agent-traces/{id}/messages`.\n- Never log the same conversation twice; reuse the returned `trace_number`.\n\n**Required shape**\n- `subject`: one short line describing the request (e.g. \"Refund for damaged copy on BK-10005\").\n- `summary`: 1-3 sentences of what you did and why, including the reasoning behind any money movement.\n- `customer_email` (and `order_id` / `ticket_id` when known) so the trace is queryable by customer and order.\n- `intent` plus `intent_confidence` (0-1): what you believed the customer wanted and how sure you were.\n- `resolution_confidence` (0-1): how confident you are that the outcome actually resolved the request. Log BOTH confidences on every trace.\n- `outcome`: one of resolved | refund_issued | return_created | escalated | deflected | unresolved.\n- `messages[]`: every turn, in order.\n\n**Message formatting rules**\n- `role`: customer | agent | tool | system | note. `speaker` is the display name shown in bold (defaults: \"Customer\", \"Agent\", \"System\").\n- `occurred_at`: ISO-8601 UTC timestamp for each turn. Timestamps are rendered next to the bold speaker.\n- Plain-language turns go in `content` as markdown; keep the customer's words verbatim.\n- For every API call you made, add a `tool` message with `tool_name` (the tool/operation id), `tool_input` (the arguments) and `tool_output` (the trimmed response).\n- Use `metadata` on a message for anything structured you want staff to see (confidence, policy id, rule that fired).\n- Use a `note` role for internal reasoning that was never shown to the customer.\n\n**Rendered format in the store console**\n`**[2026-08-14T14:03:11Z] Customer:** where is my order?` \u2014 speaker bold, timestamp first, tool calls shown as collapsible JSON.\n\n**Querying past conversations**\n- `GET /api/public/v1/agent-traces?email=...` \u2014 everything you did for this customer before.\n- `GET /api/public/v1/agent-traces?q=refund&outcome=refund_issued` \u2014 full-text search over subject, summary and transcript.\n- `GET /api/public/v1/support/tickets?email=...&q=...` \u2014 past support tickets, including their event history.\n- Always check prior traces and tickets before promising anything, so you do not contradict an earlier decision.",
+  "agent_trace_logging": {
+    "endpoint": "https://bookly.davidbusacker.com/api/public/v1/agent-traces",
+    "required": true,
+    "instructions": "## Logging your conversations back to Bookly (required after every call)\n\nAfter you finish handling a customer, POST the whole conversation to `/api/public/v1/agent-traces`.\nBookly store staff review these traces to verify what you claimed you did, so log every turn and every tool call.\n\n**When to log**\n- Once, at the end of a conversation, with the complete `messages` array.\n- If the conversation is still running, POST with `status: \"in_progress\"` and append later turns with `POST /api/public/v1/agent-traces/{id}/messages`.\n- Never log the same conversation twice; reuse the returned `trace_number`.\n\n**Required shape**\n- `subject`: one short line describing the request (e.g. \"Refund for damaged copy on BK-10005\").\n- `summary`: 1-3 sentences of what you did and why, including the reasoning behind any money movement.\n- `customer_email` (and `order_id` / `ticket_id` when known) so the trace is queryable by customer and order.\n- `intent` plus `intent_confidence` (0-1): what you believed the customer wanted and how sure you were.\n- `resolution_confidence` (0-1): how confident you are that the outcome actually resolved the request. Log BOTH confidences on every trace.\n- `outcome`: one of resolved | refund_issued | return_created | escalated | deflected | unresolved.\n- `messages[]`: every turn, in order.\n\n**Message formatting rules**\n- `role`: customer | agent | tool | system | note. `speaker` is the display name shown in bold (defaults: \"Customer\", \"Agent\", \"System\").\n- `occurred_at`: ISO-8601 UTC timestamp for each turn. Timestamps are rendered next to the bold speaker.\n- Plain-language turns go in `content` as markdown; keep the customer's words verbatim.\n- For every API call you made, add a `tool` message with `tool_name` (the tool/operation id), `tool_input` (the arguments) and `tool_output` (the trimmed response).\n- Use `metadata` on a message for anything structured you want staff to see (confidence, policy id, rule that fired).\n- Use a `note` role for internal reasoning that was never shown to the customer.\n\n**Rendered format in the store console**\n`**[2026-08-14T14:03:11Z] Customer:** where is my order?` \u2014 speaker bold, timestamp first, tool calls shown as collapsible JSON.\n\n**Querying past conversations**\n- `GET /api/public/v1/agent-traces?email=...` \u2014 everything you did for this customer before.\n- `GET /api/public/v1/agent-traces?q=refund&outcome=refund_issued` \u2014 full-text search over subject, summary and transcript.\n- `GET /api/public/v1/support/tickets?email=...&q=...` \u2014 past support tickets, including their event history.\n- Always check prior traces and tickets before promising anything, so you do not contradict an earlier decision."
+  },
   "base_url": "https://bookly.davidbusacker.com",
   "openapi_url": "https://bookly.davidbusacker.com/api/public/openapi.json",
   "tools": [
@@ -949,6 +954,25 @@
       }
     },
     {
+      "name": "get_inventory",
+      "title": "Full inventory snapshot",
+      "description": "Returns the entire book catalog in one call \u2014 every title with author, format, category, price and current stock \u2014 plus per-author rollups and totals in `meta`. No search or pagination. Call this once at the start of a conversation to load the whole catalog into context; then answer stock, author and price questions without further lookups.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "GET",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/inventory"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      }
+    },
+    {
       "name": "list_books",
       "title": "Search the catalog",
       "description": "Search books by title, author or ISBN with category, format and stock filters. Recommend replacements or confirm stock before promising a reship.",
@@ -1110,8 +1134,8 @@
     },
     {
       "name": "list_tickets",
-      "title": "List support tickets",
-      "description": "Paginated support tickets with customer and order context. Check for an existing open ticket before creating another.",
+      "title": "Search past support tickets",
+      "description": "Paginated, filterable ticket history with customer, order and full event history embedded \u2014 the record of every previous support interaction. Search this before acting: check for an existing open ticket and read what was already promised to the customer.",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -1138,6 +1162,30 @@
           "email": {
             "type": "string",
             "description": "Query parameter. Filter by customer email."
+          },
+          "customer_id": {
+            "type": "string",
+            "description": "Query parameter. Filter by customer UUID."
+          },
+          "order_id": {
+            "type": "string",
+            "description": "Query parameter. Filter by order UUID."
+          },
+          "category": {
+            "type": "string",
+            "description": "Query parameter. Comma-separated categories.",
+            "enum": [
+              "order_status",
+              "return",
+              "refund",
+              "shipping",
+              "account",
+              "other"
+            ]
+          },
+          "q": {
+            "type": "string",
+            "description": "Query parameter. Free-text search over subject and ticket number."
           },
           "limit": {
             "type": "integer",
@@ -1342,6 +1390,465 @@
           "city",
           "region",
           "postal_code"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_ticket",
+      "title": "Get one support ticket",
+      "description": "Full ticket with customer, order and the complete event history (messages, notes, resolutions). Read the ticket history before replying so you do not repeat or contradict a previous agent.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "GET",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/support/tickets/{id}"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Path segment. Ticket number (TCK-#####) or UUID."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "log_agent_trace",
+      "title": "Log a completed agent conversation",
+      "description": "Records one CX-agent conversation (every turn plus every tool call) so Bookly staff can audit what the agent did. Call this at the end of every conversation. Formatting contract: each message carries `role`, an optional bold `speaker`, an ISO-8601 `occurred_at` timestamp, markdown `content`, and \u2014 for tool turns \u2014 `tool_name`, `tool_input` and `tool_output`. Anything structured goes in `metadata`. Mandatory after every customer interaction. Include a plain-language `summary` explaining the reasoning behind any refund, return or escalation.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "POST",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/agent-traces"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "subject": {
+            "type": "string",
+            "description": "One-line description of the request."
+          },
+          "summary": {
+            "type": "string",
+            "description": "1-3 sentences on what you did and why."
+          },
+          "customer_email": {
+            "type": "string",
+            "description": "Customer email \u2014 makes the trace queryable by customer."
+          },
+          "order_id": {
+            "type": "string",
+            "description": "Related order UUID or BK-##### number."
+          },
+          "ticket_id": {
+            "type": "string",
+            "description": "Related ticket UUID or TCK-##### number."
+          },
+          "agent_name": {
+            "type": "string",
+            "description": "Display name of the agent, default 'Bookly CX Agent'."
+          },
+          "agent_version": {
+            "type": "string",
+            "description": "Your build/version string."
+          },
+          "model": {
+            "type": "string",
+            "description": "Model that ran the conversation."
+          },
+          "channel": {
+            "type": "string",
+            "description": "Contact channel.",
+            "enum": [
+              "chat",
+              "email",
+              "voice",
+              "sms",
+              "api"
+            ]
+          },
+          "intent": {
+            "type": "string",
+            "description": "Detected intent, e.g. order_status, refund_request."
+          },
+          "intent_confidence": {
+            "type": "number",
+            "description": "0-1 confidence in the detected intent. Required on every trace."
+          },
+          "resolution_confidence": {
+            "type": "number",
+            "description": "0-1 confidence that the outcome actually resolved the request. Required on every trace."
+          },
+          "outcome": {
+            "type": "string",
+            "description": "How the conversation ended.",
+            "enum": [
+              "resolved",
+              "refund_issued",
+              "return_created",
+              "escalated",
+              "deflected",
+              "unresolved"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "description": "Use in_progress if you will append more turns later.",
+            "enum": [
+              "in_progress",
+              "completed",
+              "failed"
+            ]
+          },
+          "sentiment": {
+            "type": "string",
+            "description": "Customer sentiment.",
+            "enum": [
+              "positive",
+              "neutral",
+              "negative"
+            ]
+          },
+          "escalated": {
+            "type": "boolean",
+            "description": "True when handed to a human."
+          },
+          "tags": {
+            "type": "array",
+            "description": "Free-form labels, e.g. loyalty, damaged.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "started_at": {
+            "type": "string",
+            "description": "ISO-8601 start time."
+          },
+          "ended_at": {
+            "type": "string",
+            "description": "ISO-8601 end time."
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Any extra structured context for staff."
+          },
+          "messages": {
+            "type": "array",
+            "description": "Ordered conversation turns. Log every customer message, every agent reply, every tool call and any internal reasoning notes.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "role": {
+                  "type": "string",
+                  "description": "Turn type. Use `tool` for API calls and `note` for internal reasoning never shown to the customer.",
+                  "enum": [
+                    "customer",
+                    "agent",
+                    "tool",
+                    "system",
+                    "note"
+                  ]
+                },
+                "speaker": {
+                  "type": "string",
+                  "description": "Display name rendered in bold, e.g. 'Customer' or 'Ada (CX Agent)'."
+                },
+                "content": {
+                  "type": "string",
+                  "description": "Markdown message text, verbatim for customer turns."
+                },
+                "occurred_at": {
+                  "type": "string",
+                  "description": "ISO-8601 UTC timestamp of the turn."
+                },
+                "duration_ms": {
+                  "type": "integer",
+                  "description": "How long the turn/tool call took."
+                },
+                "tool_name": {
+                  "type": "string",
+                  "description": "Tool or operation id for `tool` turns, e.g. create_refund."
+                },
+                "tool_input": {
+                  "type": "object",
+                  "description": "Arguments sent to the tool."
+                },
+                "tool_output": {
+                  "type": "object",
+                  "description": "Trimmed tool response."
+                },
+                "metadata": {
+                  "type": "object",
+                  "description": "Structured extras shown next to the turn (confidence, policy id\u2026)."
+                }
+              },
+              "required": [
+                "role",
+                "occurred_at"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "subject",
+          "messages"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "list_agent_traces",
+      "title": "Search past agent conversations",
+      "description": "Paginated, searchable history of every logged CX-agent conversation, with all messages and tool calls embedded. Check this before answering: if you already promised something to this customer, honour it instead of re-deciding.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "GET",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/agent-traces"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "Query parameter. Customer email."
+          },
+          "customer_id": {
+            "type": "string",
+            "description": "Query parameter. Customer UUID."
+          },
+          "order_id": {
+            "type": "string",
+            "description": "Query parameter. Order UUID or BK-##### number."
+          },
+          "ticket_id": {
+            "type": "string",
+            "description": "Query parameter. Ticket UUID."
+          },
+          "outcome": {
+            "type": "string",
+            "description": "Query parameter. Comma-separated outcomes.",
+            "enum": [
+              "resolved",
+              "refund_issued",
+              "return_created",
+              "escalated",
+              "deflected",
+              "unresolved"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "description": "Query parameter. Comma-separated statuses.",
+            "enum": [
+              "in_progress",
+              "completed",
+              "failed"
+            ]
+          },
+          "channel": {
+            "type": "string",
+            "description": "Query parameter. Comma-separated channels.",
+            "enum": [
+              "chat",
+              "email",
+              "voice",
+              "sms",
+              "api"
+            ]
+          },
+          "tag": {
+            "type": "string",
+            "description": "Query parameter. Single tag the trace must carry."
+          },
+          "q": {
+            "type": "string",
+            "description": "Query parameter. Free-text search over subject, summary, transcript and trace number."
+          },
+          "started_after": {
+            "type": "string",
+            "description": "Query parameter. ISO date lower bound."
+          },
+          "started_before": {
+            "type": "string",
+            "description": "Query parameter. ISO date upper bound."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Query parameter. Page size (1-100, default 25)."
+          },
+          "offset": {
+            "type": "integer",
+            "description": "Query parameter. Rows to skip (default 0)."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "get_agent_trace",
+      "title": "Get one agent conversation",
+      "description": "Full trace with customer, order, ticket and the ordered message list including tool inputs/outputs. Pull the exact wording of a previous promise before continuing a follow-up conversation.",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "GET",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/agent-traces/{id}"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Path segment. Trace number (TRC-######) or UUID."
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "append_agent_trace_messages",
+      "title": "Append turns to a trace",
+      "description": "Adds more messages to an existing trace, in order, and recomputes counts, duration and the transcript. Use for long-running conversations you logged with status in_progress.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "POST",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/agent-traces/{id}/messages"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Path segment. Trace number or UUID."
+          },
+          "messages": {
+            "type": "array",
+            "description": "Same message shape as log_agent_trace.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string",
+            "description": "Optional new status.",
+            "enum": [
+              "in_progress",
+              "completed",
+              "failed"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "messages"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "update_agent_trace",
+      "title": "Update a trace",
+      "description": "Revise the summary, outcome, sentiment, tags or status of an already-logged conversation. Close out an in_progress trace or correct the recorded outcome.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "PATCH",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/agent-traces/{id}"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Path segment. Trace number or UUID."
+          },
+          "summary": {
+            "type": "string",
+            "description": "Revised summary."
+          },
+          "outcome": {
+            "type": "string",
+            "description": "Revised outcome.",
+            "enum": [
+              "resolved",
+              "refund_issued",
+              "return_created",
+              "escalated",
+              "deflected",
+              "unresolved"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "description": "Revised status.",
+            "enum": [
+              "in_progress",
+              "completed",
+              "failed"
+            ]
+          },
+          "sentiment": {
+            "type": "string",
+            "description": "Revised sentiment.",
+            "enum": [
+              "positive",
+              "neutral",
+              "negative"
+            ]
+          },
+          "escalated": {
+            "type": "boolean",
+            "description": "Handed to a human."
+          },
+          "tags": {
+            "type": "array",
+            "description": "Replacement tag list.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "ended_at": {
+            "type": "string",
+            "description": "ISO-8601 end time."
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Replacement metadata object."
+          }
+        },
+        "required": [
+          "id"
         ],
         "additionalProperties": false
       }

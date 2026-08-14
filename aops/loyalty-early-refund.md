@@ -24,4 +24,10 @@ Customer must have **3 or more non-cancelled orders** in the **last 365 days**.
 
 ## Narration
 
-Keep it casual: *"You're good — I'll get that refund started now"* or *"We'll refund you once the return arrives"* — per outcome above.
+**If eligible:** say you're making an **exception** because they're a great customer — you looked up their recent orders and they qualify. Then confirm the refund is starting now (RMA/refund number if you just created one).
+
+Good: *"I looked at your last year of orders — you're a great customer, so I'm making an exception and starting the refund now. That's RMA-40206."*
+
+**If not eligible:** one sentence — refund processes when Bookly gets the book back. Don't mention loyalty, exceptions, or the 3-order rule.
+
+Do not sound like a coupon. Warm, direct, one beat of appreciation, then the action.

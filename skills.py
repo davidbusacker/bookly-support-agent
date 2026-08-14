@@ -34,18 +34,24 @@ def verify_phone_last_four(
         return {"ok": True, "verified": False, "message": "Need order_id or email."}
 
     phone_on_file: str | None = None
+    customer: dict[str, Any] = {}
+    order_number: str | None = None
 
     if order_id:
         result = bookly_execute("get_order", {"id": order_id})
         if not result.get("ok"):
             return {"ok": True, "verified": False, "message": "Order not found."}
-        phone_on_file = (result.get("data", {}).get("customer") or {}).get("phone")
+        data = result.get("data") or {}
+        customer = data.get("customer") or {}
+        phone_on_file = customer.get("phone")
+        order_number = data.get("order_number") or order_id
 
     elif email:
         result = bookly_execute("list_customers", {"email": email})
         if not result.get("ok") or not result.get("data"):
             return {"ok": True, "verified": False, "message": "Account not found."}
-        phone_on_file = result["data"][0].get("phone")
+        customer = result["data"][0] or {}
+        phone_on_file = customer.get("phone")
 
     expected = phone_last_four(phone_on_file)
     if not expected:
@@ -54,7 +60,18 @@ def verify_phone_last_four(
     if last_four_clean != expected:
         return {"ok": True, "verified": False, "message": "Digits do not match."}
 
-    return {"ok": True, "verified": True, "message": "Verified."}
+    # Orchestrator-only: stripped before Claude sees the tool result.
+    session_patch: dict[str, Any] = {}
+    found_email = customer.get("email") or email
+    if found_email:
+        session_patch["customer_email"] = str(found_email).lower()
+    if order_number or order_id:
+        session_patch["order_id"] = order_number or order_id
+
+    payload: dict[str, Any] = {"ok": True, "verified": True, "message": "Verified."}
+    if session_patch:
+        payload["_session"] = session_patch
+    return payload
 
 
 READ_AOP_TOOL: dict[str, Any] = {
@@ -74,6 +91,7 @@ READ_AOP_TOOL: dict[str, Any] = {
                     "identity-verification",
                     "returns-and-refunds",
                     "loyalty-early-refund",
+                    "restock-offer",
                 ],
                 "description": "Which AOP to load.",
             }
@@ -87,7 +105,8 @@ VERIFY_PHONE_TOOL: dict[str, Any] = {
     "name": "verify_phone_last_four",
     "description": (
         "Skill referenced by identity-verification AOP. Checks last 4 phone digits against "
-        "the account on file. Returns verified true/false only."
+        "the account on file. This is the only identity check — email is lookup, not auth. "
+        "Returns verified true/false only."
     ),
     "input_schema": {
         "type": "object",

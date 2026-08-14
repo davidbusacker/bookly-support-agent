@@ -6,8 +6,9 @@ Instructions Riley follows at runtime. Edit these files to change agent behavior
 |----|------|--------------|
 | `core` | core.md | Always loaded at startup |
 | `conversation-style` | conversation-style.md | Always loaded at startup |
-| `identity-verification` | identity-verification.md | Before sharing any order or customer data |
+| `identity-verification` | identity-verification.md | Always loaded at startup |
 | `returns-and-refunds` | returns-and-refunds.md | Returns, refunds, cancellations |
 | `loyalty-early-refund` | loyalty-early-refund.md | Customer asks for money back before sending the return |
+| `restock-offer` | restock-offer.md | After customer confirms resolution: offer a restocked title |
 
 Use the `read_aop` skill to load a policy in full when the situation calls for it.
