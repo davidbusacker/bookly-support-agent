@@ -53,16 +53,6 @@
     color: var(--spine);
     letter-spacing: 0.3px;
   }
-  header .sub {
-    font-size: 13px;
-    color: #6b6558;
-    margin-top: 2px;
-  }
-  #statusBar {
-    font-size: 12px;
-    color: #6b6558;
-    padding: 0 20px 8px;
-  }
   #log {
     flex: 1;
     overflow-y: auto;
@@ -203,18 +193,20 @@
     color: #d5d9e0;
     animation: peekIn 0.18s ease-out;
   }
-  .peek-item.active .peek-dot {
-    background: var(--peek-accent);
-    box-shadow: 0 0 0 3px rgba(212, 165, 116, 0.25);
+  .peek-item.active .peek-emoji {
+    filter: none;
+    transform: scale(1.05);
   }
   .peek-item.done { color: var(--peek-muted); }
-  .peek-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: #5a6472;
-    margin-top: 5px;
+  .peek-item.done .peek-emoji {
+    opacity: 0.55;
+  }
+  .peek-emoji {
+    width: 1.25em;
     flex-shrink: 0;
+    text-align: center;
+    line-height: 1.35;
+    font-size: 13px;
   }
   .peek-text { min-width: 0; }
   @keyframes peekIn {
@@ -238,10 +230,7 @@
   <div class="app">
     <header>
       <div class="brand">Bookly Support</div>
-      <div class="sub">Order status &middot; returns &middot; shipping &amp; account help</div>
     </header>
-
-    <div id="statusBar">Checking connection…</div>
 
     <div id="voiceToggleWrap">
       <input type="checkbox" id="voiceToggle" checked>
@@ -259,7 +248,6 @@
   <aside class="peek" aria-label="Peek into the agent">
     <div class="peek-header">
       <div class="peek-title">Peek into the agent</div>
-      <div class="peek-sub">Live stream of what Riley is doing — titles only, for demos.</div>
     </div>
     <div id="peekLog">
       <div class="peek-empty" id="peekEmpty">Waiting for the next turn…</div>
@@ -279,7 +267,6 @@ const textInput = document.getElementById('textInput');
 const composer = document.getElementById('composer');
 const sendBtn = document.getElementById('sendBtn');
 const voiceToggle = document.getElementById('voiceToggle');
-const statusBar = document.getElementById('statusBar');
 
 function addMessage(role, text) {
   const div = document.createElement('div');
@@ -325,6 +312,39 @@ function beginPeekTurn() {
   peekLog.scrollTop = peekLog.scrollHeight;
 }
 
+function peekEmoji(text) {
+  const t = (text || '').toLowerCase();
+  if (t.startsWith('blocked') || t.includes('not authenticated')) return '🚫';
+  if (t.includes('authenticated') && !t.includes('not ')) return '🔓';
+  if (t.includes('customer message')) return '💬';
+  if (t.includes('classifying intent') || t.startsWith('intent:')) return '🎯';
+  if (t.includes('intent unclear') || t.includes('clarify')) return '❓';
+  if (t.includes('verifying phone') || t.includes('last 4')) return '📱';
+  if (t.includes('reading a policy') || t.includes('policy') || t.includes('faq')) return '📜';
+  if (t.includes('looking up the order') || t.includes('listing past orders')) return '📦';
+  if (t.includes('looking up the customer') || t.includes('looking up a title')) return '👤';
+  if (t.includes('checking inventory') || t.includes('inventory')) return '📚';
+  if (t.includes('opening a return') || t.includes('return')) return '↩️';
+  if (t.includes('issuing a refund') || t.includes('updating a refund') || t.includes('refund')) return '💸';
+  if (t.includes('cancelling')) return '🛑';
+  if (t.includes('escalating') || t.includes('ticket')) return '🎫';
+  if (t.includes('prior conversation') || t.includes('agent trace') || t.includes('logging turn') || t.includes('starting bookly')) return '🗂️';
+  if (t.includes('reship')) return '🚚';
+  if (t.includes('address')) return '🏠';
+  if (t.includes('password')) return '🔑';
+  if (t.includes('restock match')) return '✨';
+  if (t.includes('no restock')) return '📭';
+  if (t.includes('restock') || t.includes('checking prior traces')) return '🛒';
+  if (t.includes('scoring resolution') || t.startsWith('resolution ')) return '📊';
+  if (t.includes('asking if everything') || t.includes('waiting on customer')) return '✅';
+  if (t.includes("checking if they're done") || t.includes("said they're done")) return '🏁';
+  if (t.includes('riley is reasoning') || t.includes('writing reply')) return '✍️';
+  if (t.includes('reply ready') || t.includes('turn complete') || t.includes('restock offer attached')) return '🟢';
+  if (t.includes('error') || t.includes('network')) return '⚠️';
+  if (t.includes('using ')) return '🛠️';
+  return '•';
+}
+
 function addPeek(text) {
   if (!text) return;
   const prev = peekLog.querySelector('.peek-item.active');
@@ -335,7 +355,8 @@ function addPeek(text) {
 
   const row = document.createElement('div');
   row.className = 'peek-item active';
-  row.innerHTML = '<span class="peek-dot"></span><span class="peek-text"></span>';
+  row.innerHTML = '<span class="peek-emoji"></span><span class="peek-text"></span>';
+  row.querySelector('.peek-emoji').textContent = peekEmoji(text);
   row.querySelector('.peek-text').textContent = text;
   peekLog.appendChild(row);
   peekLog.scrollTop = peekLog.scrollHeight;
@@ -498,24 +519,6 @@ composer.addEventListener('submit', (e) => {
   sendMessage(text);
 });
 
-async function checkHealth() {
-  try {
-    const res = await fetch('/api/health');
-    const data = await res.json();
-    const parts = [];
-    if (data.anthropic_configured) parts.push('Claude ready');
-    else parts.push('Claude key missing');
-    if (data.bookly_api?.ok) parts.push(`${data.tools_loaded || 33} Bookly tools live`);
-    else parts.push('Bookly API unreachable');
-    if (data.elevenlabs_configured) parts.push('ElevenLabs ready');
-    else parts.push('ElevenLabs key missing');
-    statusBar.textContent = parts.join(' · ');
-  } catch {
-    statusBar.textContent = 'Server offline — run ./run.sh';
-  }
-}
-
-checkHealth();
 initSession();
 </script>
 </body>
