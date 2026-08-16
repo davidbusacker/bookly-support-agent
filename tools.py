@@ -2,7 +2,7 @@
 Tool dispatch — Bookly MCP manifest + AOP/skills layer.
 
 Business rules: aops/*.md (Agent Operating Policies)
-Execution: bookly_client.py (HTTP to Bookly API)
+Execution: bookly_client.py (MCP to Bookly, REST fallback)
 Skills: skills.py (verify_phone, read_aop)
 Hard guardrail: account/PII tools blocked until session.authenticated.
 """

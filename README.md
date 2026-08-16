@@ -12,7 +12,7 @@ Claude (Riley)         Reasons over policies + customer context
 Bookly MCP API         Orders, returns, refunds (live backend)
   ↓
 skills.py              Thin helpers only (verify_phone, read_aop dispatch)
-bookly_client.py       HTTP execution of manifest tools
+bookly_client.py       MCP client → Bookly /mcp (REST fallback)
 trace_client.py        Admin audit logs → bookly.davidbusacker.com/admin/agent-traces
 intent.py              Intent confidence guardrail (<50% → clarify)
 resolution.py          Resolution score (≥90% → restock check)
@@ -39,7 +39,7 @@ app.py                 Flask server + orchestration loop + TTS
 |-------|---------|
 | `read_aop` | Load full policy text on demand |
 | `verify_phone_last_four` | Pass/fail phone check; sets session authenticated for tool ACL |
-| 33× Bookly tools | From [tools.json](https://bookly-agent-api.lovable.app/api/public/tools.json) |
+| 42× Bookly tools | Live MCP at `https://bookly.davidbusacker.com/mcp` (REST `tools.json` fallback) |
 
 ## Quick start
 

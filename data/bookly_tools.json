@@ -3,11 +3,11 @@
   "name": "bookly-support",
   "title": "Bookly Support",
   "version": "1.0.0",
-  "instructions": "Tools for the Bookly bookstore support agent. Resolve the customer first (email or order number), check policy/eligibility before promising anything, and escalate with create_ticket when a request cannot be resolved.\nBefore you answer, search prior context with list_agent_traces and list_tickets so you never contradict an earlier decision.\n\n## Logging your conversations back to Bookly (required after every call)\n\nAfter you finish handling a customer, POST the whole conversation to `/api/public/v1/agent-traces`.\nBookly store staff review these traces to verify what you claimed you did, so log every turn and every tool call.\n\n**When to log**\n- Once, at the end of a conversation, with the complete `messages` array.\n- If the conversation is still running, POST with `status: \"in_progress\"` and append later turns with `POST /api/public/v1/agent-traces/{id}/messages`.\n- Never log the same conversation twice; reuse the returned `trace_number`.\n\n**Required shape**\n- `subject`: one short line describing the request (e.g. \"Refund for damaged copy on BK-10005\").\n- `summary`: 1-3 sentences of what you did and why, including the reasoning behind any money movement.\n- `customer_email` (and `order_id` / `ticket_id` when known) so the trace is queryable by customer and order.\n- `intent` plus `intent_confidence` (0-1): what you believed the customer wanted and how sure you were.\n- `resolution_confidence` (0-1): how confident you are that the outcome actually resolved the request. Log BOTH confidences on every trace.\n- `outcome`: one of resolved | refund_issued | return_created | escalated | deflected | unresolved.\n- `messages[]`: every turn, in order.\n\n**Message formatting rules**\n- `role`: customer | agent | tool | system | note. `speaker` is the display name shown in bold (defaults: \"Customer\", \"Agent\", \"System\").\n- `occurred_at`: ISO-8601 UTC timestamp for each turn. Timestamps are rendered next to the bold speaker.\n- Plain-language turns go in `content` as markdown; keep the customer's words verbatim.\n- For every API call you made, add a `tool` message with `tool_name` (the tool/operation id), `tool_input` (the arguments) and `tool_output` (the trimmed response).\n- Use `metadata` on a message for anything structured you want staff to see (confidence, policy id, rule that fired).\n- Use a `note` role for internal reasoning that was never shown to the customer.\n\n**Rendered format in the store console**\n`**[2026-08-14T14:03:11Z] Customer:** where is my order?` \u2014 speaker bold, timestamp first, tool calls shown as collapsible JSON.\n\n**Querying past conversations**\n- `GET /api/public/v1/agent-traces?email=...` \u2014 everything you did for this customer before.\n- `GET /api/public/v1/agent-traces?q=refund&outcome=refund_issued` \u2014 full-text search over subject, summary and transcript.\n- `GET /api/public/v1/support/tickets?email=...&q=...` \u2014 past support tickets, including their event history.\n- Always check prior traces and tickets before promising anything, so you do not contradict an earlier decision.",
+  "instructions": "Tools for the Bookly bookstore support agent. Resolve the customer first (email or order number), check policy/eligibility before promising anything, and escalate with create_ticket when a request cannot be resolved.\nBefore you answer, search prior context with list_agent_traces and list_tickets so you never contradict an earlier decision.\n\n## Logging your conversations back to Bookly (required after every call)\n\nAfter you finish handling a customer, POST the whole conversation to `/api/public/v1/agent-traces`.\nBookly store staff review these traces to verify what you claimed you did, so log every turn and every tool call.\n\n**When to log**\n- Once, at the end of a conversation, with the complete `messages` array.\n- If the conversation is still running, POST with `status: \"in_progress\"` and append later turns with `POST /api/public/v1/agent-traces/{id}/messages`.\n- Never log the same conversation twice; reuse the returned `trace_number`.\n\n**Required shape**\n- `subject`: one short line describing the request (e.g. \"Refund for damaged copy on BK-10005\").\n- `summary`: 1-3 sentences of what you did and why, including the reasoning behind any money movement.\n- `customer_email` (and `order_id` / `ticket_id` when known) so the trace is queryable by customer and order.\n- `intent` plus `intent_confidence` (0-1): what you believed the customer wanted and how sure you were.\n- `resolution_confidence` (0-1): how confident you are that the outcome actually resolved the request. Log BOTH confidences on every trace.\n- `outcome`: one of resolved | refund_issued | return_created | escalated | deflected | unresolved.\n- `messages[]`: every turn, in order.\n\n**Message formatting rules**\n- `role`: customer | agent | tool | system | note. `speaker` is the display name shown in bold (defaults: \"Customer\", \"Agent\", \"System\").\n- `occurred_at`: ISO-8601 UTC timestamp for each turn. Timestamps are rendered next to the bold speaker.\n- Plain-language turns go in `content` as markdown; keep the customer's words verbatim.\n- For every API call you made, add a `tool` message with `tool_name` (the tool/operation id), `tool_input` (the arguments) and `tool_output` (the trimmed response).\n- EVERY agent (and tool) message MUST carry its own `intent_confidence` and `resolution_confidence` (0-1): the confidence that informed that specific reply. The console renders them as pie charts under each turn so staff can see the confidence trajectory across the conversation.\n- Use `metadata` on a message for anything structured you want staff to see (policy id, rule that fired).\n- Use a `note` role for internal reasoning that was never shown to the customer.\n\n**Rendered format in the store console**\n`**[2026-08-14T14:03:11Z] Customer:** where is my order?` \u2014 speaker bold, timestamp first, tool calls shown as collapsible JSON.\n\n**Querying past conversations**\n- `GET /api/public/v1/agent-traces?email=...` \u2014 everything you did for this customer before.\n- `GET /api/public/v1/agent-traces?q=refund&outcome=refund_issued` \u2014 full-text search over subject, summary and transcript.\n- `GET /api/public/v1/support/tickets?email=...&q=...` \u2014 past support tickets, including their event history.\n- Always check prior traces and tickets before promising anything, so you do not contradict an earlier decision.",
   "agent_trace_logging": {
     "endpoint": "https://bookly.davidbusacker.com/api/public/v1/agent-traces",
     "required": true,
-    "instructions": "## Logging your conversations back to Bookly (required after every call)\n\nAfter you finish handling a customer, POST the whole conversation to `/api/public/v1/agent-traces`.\nBookly store staff review these traces to verify what you claimed you did, so log every turn and every tool call.\n\n**When to log**\n- Once, at the end of a conversation, with the complete `messages` array.\n- If the conversation is still running, POST with `status: \"in_progress\"` and append later turns with `POST /api/public/v1/agent-traces/{id}/messages`.\n- Never log the same conversation twice; reuse the returned `trace_number`.\n\n**Required shape**\n- `subject`: one short line describing the request (e.g. \"Refund for damaged copy on BK-10005\").\n- `summary`: 1-3 sentences of what you did and why, including the reasoning behind any money movement.\n- `customer_email` (and `order_id` / `ticket_id` when known) so the trace is queryable by customer and order.\n- `intent` plus `intent_confidence` (0-1): what you believed the customer wanted and how sure you were.\n- `resolution_confidence` (0-1): how confident you are that the outcome actually resolved the request. Log BOTH confidences on every trace.\n- `outcome`: one of resolved | refund_issued | return_created | escalated | deflected | unresolved.\n- `messages[]`: every turn, in order.\n\n**Message formatting rules**\n- `role`: customer | agent | tool | system | note. `speaker` is the display name shown in bold (defaults: \"Customer\", \"Agent\", \"System\").\n- `occurred_at`: ISO-8601 UTC timestamp for each turn. Timestamps are rendered next to the bold speaker.\n- Plain-language turns go in `content` as markdown; keep the customer's words verbatim.\n- For every API call you made, add a `tool` message with `tool_name` (the tool/operation id), `tool_input` (the arguments) and `tool_output` (the trimmed response).\n- Use `metadata` on a message for anything structured you want staff to see (confidence, policy id, rule that fired).\n- Use a `note` role for internal reasoning that was never shown to the customer.\n\n**Rendered format in the store console**\n`**[2026-08-14T14:03:11Z] Customer:** where is my order?` \u2014 speaker bold, timestamp first, tool calls shown as collapsible JSON.\n\n**Querying past conversations**\n- `GET /api/public/v1/agent-traces?email=...` \u2014 everything you did for this customer before.\n- `GET /api/public/v1/agent-traces?q=refund&outcome=refund_issued` \u2014 full-text search over subject, summary and transcript.\n- `GET /api/public/v1/support/tickets?email=...&q=...` \u2014 past support tickets, including their event history.\n- Always check prior traces and tickets before promising anything, so you do not contradict an earlier decision."
+    "instructions": "## Logging your conversations back to Bookly (required after every call)\n\nAfter you finish handling a customer, POST the whole conversation to `/api/public/v1/agent-traces`.\nBookly store staff review these traces to verify what you claimed you did, so log every turn and every tool call.\n\n**When to log**\n- Once, at the end of a conversation, with the complete `messages` array.\n- If the conversation is still running, POST with `status: \"in_progress\"` and append later turns with `POST /api/public/v1/agent-traces/{id}/messages`.\n- Never log the same conversation twice; reuse the returned `trace_number`.\n\n**Required shape**\n- `subject`: one short line describing the request (e.g. \"Refund for damaged copy on BK-10005\").\n- `summary`: 1-3 sentences of what you did and why, including the reasoning behind any money movement.\n- `customer_email` (and `order_id` / `ticket_id` when known) so the trace is queryable by customer and order.\n- `intent` plus `intent_confidence` (0-1): what you believed the customer wanted and how sure you were.\n- `resolution_confidence` (0-1): how confident you are that the outcome actually resolved the request. Log BOTH confidences on every trace.\n- `outcome`: one of resolved | refund_issued | return_created | escalated | deflected | unresolved.\n- `messages[]`: every turn, in order.\n\n**Message formatting rules**\n- `role`: customer | agent | tool | system | note. `speaker` is the display name shown in bold (defaults: \"Customer\", \"Agent\", \"System\").\n- `occurred_at`: ISO-8601 UTC timestamp for each turn. Timestamps are rendered next to the bold speaker.\n- Plain-language turns go in `content` as markdown; keep the customer's words verbatim.\n- For every API call you made, add a `tool` message with `tool_name` (the tool/operation id), `tool_input` (the arguments) and `tool_output` (the trimmed response).\n- EVERY agent (and tool) message MUST carry its own `intent_confidence` and `resolution_confidence` (0-1): the confidence that informed that specific reply. The console renders them as pie charts under each turn so staff can see the confidence trajectory across the conversation.\n- Use `metadata` on a message for anything structured you want staff to see (policy id, rule that fired).\n- Use a `note` role for internal reasoning that was never shown to the customer.\n\n**Rendered format in the store console**\n`**[2026-08-14T14:03:11Z] Customer:** where is my order?` \u2014 speaker bold, timestamp first, tool calls shown as collapsible JSON.\n\n**Querying past conversations**\n- `GET /api/public/v1/agent-traces?email=...` \u2014 everything you did for this customer before.\n- `GET /api/public/v1/agent-traces?q=refund&outcome=refund_issued` \u2014 full-text search over subject, summary and transcript.\n- `GET /api/public/v1/support/tickets?email=...&q=...` \u2014 past support tickets, including their event history.\n- Always check prior traces and tickets before promising anything, so you do not contradict an earlier decision."
   },
   "base_url": "https://bookly.davidbusacker.com",
   "openapi_url": "https://bookly.davidbusacker.com/api/public/openapi.json",
@@ -109,6 +109,101 @@
             "description": "Query parameter. Rows to skip (default 0)."
           }
         },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "place_order",
+      "title": "Place a new order",
+      "description": "Creates an order for an existing customer (or a brand-new one) and charges it. Books are matched by book_id, isbn or partial title; prices come from the catalog, so never send prices. Shipping: ground is free over $35.00 otherwise $4.99, expedited $12.99, overnight $24.99. Tax is 8.25% of the discounted subtotal. Stock is decremented, a charge transaction is written, and the response includes the full order plus a pricing breakdown. Use when a caller wants to buy or re-order a title. Load GET /api/public/v1/inventory first to confirm the exact ISBN and stock, then place the order. If a title is short on stock you get 409 conflict \u2014 read back the shortfall and retry with allow_backorder: true only after the customer agrees.",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false
+      },
+      "http": {
+        "method": "POST",
+        "url": "https://bookly.davidbusacker.com/api/public/v1/orders"
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "customer": {
+            "type": "string",
+            "description": "Customer UUID or email address."
+          },
+          "customer_name": {
+            "type": "string",
+            "description": "Full name, only used when creating a new customer."
+          },
+          "create_customer_if_missing": {
+            "type": "boolean",
+            "description": "Create the customer when the email is unknown. Requires an email in `customer`."
+          },
+          "items": {
+            "type": "array",
+            "description": "1-20 lines to purchase.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "isbn": {
+                  "type": "string",
+                  "description": "Preferred way to identify the book."
+                },
+                "book_id": {
+                  "type": "string",
+                  "description": "Book UUID."
+                },
+                "title": {
+                  "type": "string",
+                  "description": "Partial title match, used when no ISBN is known."
+                },
+                "quantity": {
+                  "type": "integer",
+                  "description": "Units to buy (default 1, max 20)."
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "shipping_speed": {
+            "type": "string",
+            "description": "Shipping service level, default ground.",
+            "enum": [
+              "ground",
+              "expedited",
+              "overnight"
+            ]
+          },
+          "shipping_address": {
+            "type": "object",
+            "description": "Optional override: line1, line2, city, state, postal_code, country. Defaults to the customer's address on file."
+          },
+          "payment_method": {
+            "type": "string",
+            "description": "Payment descriptor, default visa_4242."
+          },
+          "discount_cents": {
+            "type": "integer",
+            "description": "Goodwill discount in cents."
+          },
+          "use_store_credit": {
+            "type": "boolean",
+            "description": "Apply the customer's available store credit to this order."
+          },
+          "allow_backorder": {
+            "type": "boolean",
+            "description": "Place the order as `backordered` instead of failing when stock is short."
+          },
+          "notes": {
+            "type": "string",
+            "description": "Internal note recorded on the order."
+          }
+        },
+        "required": [
+          "customer",
+          "items"
+        ],
         "additionalProperties": false
       }
     },
@@ -1590,14 +1685,24 @@
                   "type": "object",
                   "description": "Trimmed tool response."
                 },
+                "intent_confidence": {
+                  "type": "number",
+                  "description": "0-1 confidence in the understood intent AT THIS TURN. Required on every agent/tool turn; rendered as a pie chart."
+                },
+                "resolution_confidence": {
+                  "type": "number",
+                  "description": "0-1 confidence that this turn moves toward/achieves resolution. Required on every agent/tool turn; rendered as a pie chart."
+                },
                 "metadata": {
                   "type": "object",
-                  "description": "Structured extras shown next to the turn (confidence, policy id\u2026)."
+                  "description": "Structured extras shown next to the turn (policy id, rule that fired\u2026)."
                 }
               },
               "required": [
                 "role",
-                "occurred_at"
+                "occurred_at",
+                "intent_confidence",
+                "resolution_confidence"
               ],
               "additionalProperties": false
             }
