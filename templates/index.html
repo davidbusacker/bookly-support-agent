@@ -87,6 +87,39 @@
     color: #7a3030;
     font-size: 13px;
   }
+  .chat-ended {
+    align-self: center;
+    max-width: 90%;
+    text-align: center;
+    padding: 8px 4px 16px;
+  }
+  .chat-ended-copy {
+    font-size: 13px;
+    font-style: italic;
+    color: #6b6558;
+    margin-bottom: 8px;
+  }
+  .star-row {
+    display: flex;
+    justify-content: center;
+    gap: 4px;
+  }
+  .star-btn {
+    background: none;
+    border: none;
+    padding: 0 2px;
+    font-size: 22px;
+    line-height: 1;
+    color: #c4b8a4;
+    cursor: pointer;
+  }
+  .star-btn:hover,
+  .star-btn.filled {
+    color: var(--spine);
+  }
+  .star-btn:disabled {
+    cursor: default;
+  }
   .typing {
     align-self: flex-start;
     color: #6b6558;
@@ -233,7 +266,7 @@
     </header>
 
     <div id="voiceToggleWrap">
-      <input type="checkbox" id="voiceToggle" checked>
+      <input type="checkbox" id="voiceToggle">
       <label for="voiceToggle">Speak responses aloud (ElevenLabs TTS)</label>
     </div>
 
@@ -260,6 +293,7 @@ let sessionId = null;
 let isSending = false;
 let currentAudio = null;
 let peekTurn = 0;
+let chatEnded = false;
 
 const log = document.getElementById('log');
 const peekLog = document.getElementById('peekLog');
@@ -293,8 +327,44 @@ function removeTyping() {
 
 function setSending(active) {
   isSending = active;
-  sendBtn.disabled = active;
-  textInput.disabled = active;
+  sendBtn.disabled = active || chatEnded;
+  textInput.disabled = active || chatEnded;
+}
+
+function showChatEnded() {
+  if (document.getElementById('chatEnded')) return;
+  chatEnded = true;
+  const wrap = document.createElement('div');
+  wrap.className = 'chat-ended';
+  wrap.id = 'chatEnded';
+  wrap.innerHTML =
+    '<div class="chat-ended-copy">This chat has ended. Provide feedback</div>' +
+    '<div class="star-row" role="group" aria-label="Rate this chat"></div>';
+  const row = wrap.querySelector('.star-row');
+  for (let i = 1; i <= 5; i++) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'star-btn';
+    btn.dataset.value = String(i);
+    btn.setAttribute('aria-label', i + ' star' + (i === 1 ? '' : 's'));
+    btn.textContent = '☆';
+    btn.addEventListener('click', () => rateChat(i, wrap));
+    row.appendChild(btn);
+  }
+  log.appendChild(wrap);
+  log.scrollTop = log.scrollHeight;
+  textInput.placeholder = 'This chat has ended';
+  textInput.disabled = true;
+  sendBtn.disabled = true;
+}
+
+function rateChat(value, wrap) {
+  wrap.querySelectorAll('.star-btn').forEach((btn) => {
+    const n = Number(btn.dataset.value);
+    const filled = n <= value;
+    btn.textContent = filled ? '★' : '☆';
+    btn.classList.toggle('filled', filled);
+  });
 }
 
 function beginPeekTurn() {
@@ -383,7 +453,7 @@ async function initSession() {
 
 async function sendMessage(text) {
   const trimmed = text.trim();
-  if (!trimmed || isSending) return;
+  if (!trimmed || isSending || chatEnded) return;
 
   setSending(true);
   addMessage('user', trimmed);
@@ -410,6 +480,7 @@ async function sendMessage(text) {
       addMessage('agent', data.reply);
       finishPeek('Reply ready');
       if (voiceToggle.checked) speak(data.reply);
+      if (data.chat_ended) showChatEnded();
       return;
     }
 
@@ -461,6 +532,7 @@ async function sendMessage(text) {
             finishPeek('Turn complete');
           }
           if (voiceToggle.checked && full) speak(full);
+          if (ev.chat_ended) showChatEnded();
         } else if (ev.type === 'error') {
           removeTyping();
           addMessage('error', 'Error: ' + ev.error);
@@ -479,7 +551,7 @@ async function sendMessage(text) {
     finishPeek('Network error');
   } finally {
     setSending(false);
-    textInput.focus();
+    if (!chatEnded) textInput.focus();
   }
 }
 
@@ -513,6 +585,7 @@ async function speak(text) {
 
 composer.addEventListener('submit', (e) => {
   e.preventDefault();
+  if (chatEnded) return;
   const text = textInput.value.trim();
   if (!text) return;
   textInput.value = '';
