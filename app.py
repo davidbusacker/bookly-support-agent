@@ -798,9 +798,6 @@ def _chat_events(session: Session, session_id: str, user_message: str):
             "trace_id": session.trace_id,
             "trace_number": session.trace_number,
             "customer_email": session.customer_email,
-            "chat_ended": bool(
-                looks_like_customer_done(user_message) or restock_payload
-            ),
         }
     )
 
@@ -854,7 +851,6 @@ def _confirmed_resolution_events(
             "trace_id": session.trace_id,
             "trace_number": session.trace_number,
             "customer_email": session.customer_email,
-            "chat_ended": True,
         }
     )
 

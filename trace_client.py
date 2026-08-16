@@ -59,6 +59,8 @@ def trace_message(
     msg: dict[str, Any] = {
         "role": role,
         "occurred_at": occurred_at or utc_now(),
+        "intent_confidence": float((metadata or {}).get("intent_confidence") or 0.0),
+        "resolution_confidence": float((metadata or {}).get("resolution_confidence") or 0.0),
     }
     if content:
         msg["content"] = content
@@ -119,6 +121,10 @@ class TraceClient:
             payload["intent"] = intent
         if metadata:
             payload["metadata"] = metadata
+            if metadata.get("intent_confidence") is not None:
+                payload["intent_confidence"] = metadata["intent_confidence"]
+        payload.setdefault("intent_confidence", 0.0)
+        payload.setdefault("resolution_confidence", 0.0)
         return self.bookly.execute_tool("log_agent_trace", payload)
 
     def append_messages(
