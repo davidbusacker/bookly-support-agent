@@ -14,9 +14,7 @@ Bookly MCP API         Orders, returns, refunds (live backend)
 skills.py              Thin helpers only (verify_phone, read_aop dispatch)
 bookly_client.py       MCP client → Bookly /mcp (REST fallback)
 trace_client.py        Admin audit logs → bookly.davidbusacker.com/admin/agent-traces
-intent.py              Intent confidence guardrail (<50% → clarify)
-resolution.py          Resolution score (≥90% → restock check)
-restock.py             Inventory snapshot + prior-trace restock offer
+guardrails.py          Orchestrator classifiers — intent (<50% clarify), resolution (≥90%), restock
 app.py                 Flask server + orchestration loop + TTS
 ```
 

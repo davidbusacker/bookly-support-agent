@@ -18,19 +18,20 @@ import anthropic
 from elevenlabs import ElevenLabs, VoiceSettings
 
 from aop_loader import build_system_prompt
-from intent import IntentResult, build_clarification_reply, classify_intent, message_plain_text
-from resolution import (
+from guardrails import (
     CONFIRM_QUESTION,
     ConfirmResult,
+    IntentResult,
+    build_clarification_reply,
+    classify_intent,
     classify_resolution_confirm,
-    looks_like_customer_done,
-    score_resolution,
-    should_score_resolution,
-)
-from restock import (
     fetch_inventory,
     find_restock_offer,
     looks_like_availability_interest,
+    looks_like_customer_done,
+    message_plain_text,
+    score_resolution,
+    should_score_resolution,
     traces_search_blob,
 )
 from tts_utils import prepare_text_for_speech
