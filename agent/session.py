@@ -30,6 +30,8 @@ class Session:
     awaiting_resolution_confirm: bool = False
     resolution_confirmed: bool = False
     restock_offered: bool = False
+    awaiting_restock_confirm: bool = False
+    pending_restock: dict[str, Any] | None = None
     authenticated: bool = False
     auth_subject: str | None = None  # order id or email that passed last-4
 
