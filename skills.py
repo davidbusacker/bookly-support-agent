@@ -7,6 +7,8 @@ Policy lives in aops/*.md; skills only do deterministic checks the LLM cannot sa
 import re
 from typing import Any, Callable
 
+from aop_loader import all_aop_ids
+
 
 def phone_last_four(phone: str | None) -> str | None:
     if not phone:
@@ -78,32 +80,31 @@ def verify_phone_last_four(
     return payload
 
 
-READ_AOP_TOOL: dict[str, Any] = {
-    "name": "read_aop",
-    "description": (
-        "Load a Bookly Agent Operating Policy (AOP) — internal instructions for how to handle "
-        "a situation. Call before identity, return/refund, or loyalty decisions."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "policy_id": {
-                "type": "string",
-                "enum": [
-                    "core",
-                    "conversation-style",
-                    "identity-verification",
-                    "returns-and-refunds",
-                    "loyalty-early-refund",
-                    "restock-offer",
-                ],
-                "description": "Which AOP to load.",
-            }
+def _read_aop_tool() -> dict[str, Any]:
+    ids = list(all_aop_ids())
+    return {
+        "name": "read_aop",
+        "description": (
+            "Load a Bookly Agent Operating Policy (AOP) by policy_id. "
+            "The system prompt catalog lists every AOP with when to load it. "
+            "Call before acting on any on-demand policy."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "policy_id": {
+                    "type": "string",
+                    "enum": ids,
+                    "description": "Which AOP to load. Must match an id from the catalog.",
+                }
+            },
+            "required": ["policy_id"],
+            "additionalProperties": False,
         },
-        "required": ["policy_id"],
-        "additionalProperties": False,
-    },
-}
+    }
+
+
+READ_AOP_TOOL: dict[str, Any] = _read_aop_tool()
 
 VERIFY_PHONE_TOOL: dict[str, Any] = {
     "name": "verify_phone_last_four",

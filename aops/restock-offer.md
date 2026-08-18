@@ -1,3 +1,9 @@
+---
+title: Restock Offer
+description: Do not pitch mid-issue. The orchestrator applies this after the customer confirms resolution. Call only if you need the full restock rules.
+startup: false
+---
+
 # AOP — Restock offer (demo)
 
 ## When it runs

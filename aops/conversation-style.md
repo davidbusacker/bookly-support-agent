@@ -1,3 +1,9 @@
+---
+title: Conversation Style
+description: Always loaded. Tone, length, one question per turn, progressive disclosure.
+startup: true
+---
+
 # AOP — Conversation Style
 
 ## Tone

@@ -5,7 +5,7 @@ Conversational support agent for **Bookly**, built in a **Decagon-style AOP arch
 ## Architecture
 
 ```
-aops/*.md              Agent Operating Policies (behavior — edit these)
+aops/*.md              Agent Operating Policies (title + description catalog; startup AOPs inlined)
   ↓ read at startup / via read_aop skill
 Claude (Riley)         Reasons over policies + customer context
   ↓ tool calls
@@ -18,7 +18,7 @@ guardrails.py          Orchestrator classifiers — intent (<50% clarify), resol
 app.py                 Flask server + orchestration loop + TTS
 ```
 
-**Business rules live in markdown, not Python.** Change loyalty, verification, or tone by editing `aops/`.
+**Business rules live in markdown, not Python.** Change loyalty, verification, or tone by editing `aops/`. Add a new AOP by adding a `.md` file with `title` / `description` frontmatter — the system prompt catalog and `read_aop` enum update automatically.
 
 ## Agent Operating Policies
 
