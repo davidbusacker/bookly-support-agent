@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Callable
+import re
 
 import anthropic
 
@@ -451,8 +452,6 @@ def looks_like_availability_interest(*texts: str) -> bool:
     return any(hint in blob for hint in OOS_HINTS)
 
 
-INVENTORY_PAGE_SIZE = 100
-
 MATCH_TOOL: dict[str, Any] = {
     "name": "report_restock_match",
     "description": "Whether to offer a restocked title after resolving the support issue.",
@@ -462,7 +461,11 @@ MATCH_TOOL: dict[str, Any] = {
             "should_offer": {"type": "boolean"},
             "title": {"type": "string", "description": "In-stock title to mention."},
             "author": {"type": "string"},
-            "isbn": {"type": "string"},
+            "isbn": {"type": "string", "description": "ISBN of an in-stock format/SKU only."},
+            "format": {
+                "type": "string",
+                "description": "Format of that SKU (hardcover, paperback, ebook, audiobook).",
+            },
             "stock": {"type": "integer"},
             "reason": {
                 "type": "string",
@@ -474,12 +477,74 @@ MATCH_TOOL: dict[str, Any] = {
     },
 }
 
+FORMAT_PREFERENCE = ("paperback", "hardcover", "ebook", "audiobook")
+
+RESTOCK_ACCEPT_HINTS = (
+    "yes",
+    "yeah",
+    "yep",
+    "yup",
+    "sure",
+    "please",
+    "go ahead",
+    "love to",
+    "i'd like",
+    "id like",
+    "sounds good",
+    "do it",
+    "order it",
+    "order one",
+    "make an order",
+    "place the order",
+    "buy it",
+    "i want it",
+    "i'd love",
+    "id love",
+)
+
+RESTOCK_DECLINE_HINTS = (
+    "no thanks",
+    "no thank you",
+    "not today",
+    "maybe later",
+    "nope",
+    "nah",
+    "skip it",
+    "don't want",
+    "dont want",
+    "not interested",
+    "not sure",
+    "not really",
+)
+
+
+def _blob_has_hint(text: str, hints: tuple[str, ...]) -> bool:
+    lowered = " ".join((text or "").lower().split())
+    for hint in hints:
+        if " " in hint:
+            if hint in lowered:
+                return True
+        elif re.search(rf"\b{re.escape(hint)}\b", lowered):
+            return True
+    return False
+
+
+def looks_like_restock_accept(text: str) -> bool:
+    if looks_like_restock_decline(text):
+        return False
+    return _blob_has_hint(text, RESTOCK_ACCEPT_HINTS)
+
+
+def looks_like_restock_decline(text: str) -> bool:
+    return _blob_has_hint(text, RESTOCK_DECLINE_HINTS)
+
 
 @dataclass
 class RestockOffer:
     title: str
     author: str
     isbn: str | None
+    format: str | None
     stock: int | None
     reason: str
     solicitation: str
@@ -489,6 +554,7 @@ class RestockOffer:
             "title": self.title,
             "author": self.author,
             "isbn": self.isbn,
+            "format": self.format,
             "stock": self.stock,
             "reason": self.reason,
             "solicitation": self.solicitation,
@@ -496,26 +562,18 @@ class RestockOffer:
 
 
 def fetch_inventory(execute_tool: Callable) -> list[dict[str, Any]]:
-    """Snapshot the full Bookly catalog via list_books."""
-    books: list[dict[str, Any]] = []
-    offset = 0
-    while True:
-        result = execute_tool("list_books", {"limit": INVENTORY_PAGE_SIZE, "offset": offset})
-        if not result.get("ok"):
-            break
-        page = result.get("data") or []
-        if isinstance(page, dict):
-            page = page.get("data") or []
-        books.extend(page)
-        meta = result.get("meta") or {}
-        if not meta.get("has_more"):
-            break
-        offset = meta.get("next_offset")
-        if offset is None:
-            offset = len(books)
-        if not page:
-            break
-    return books
+    """Full catalog with per-format stock via get_inventory (not list_books)."""
+    result = execute_tool("get_inventory", {})
+    if not result.get("ok"):
+        return []
+    data = result.get("data")
+    if isinstance(data, dict):
+        books = data.get("books") or []
+    elif isinstance(data, list):
+        books = data
+    else:
+        books = []
+    return books if isinstance(books, list) else []
 
 
 def compact_inventory(books: list[dict[str, Any]]) -> str:
@@ -524,9 +582,72 @@ def compact_inventory(books: list[dict[str, Any]]) -> str:
         stock = book.get("stock", 0)
         lines.append(
             f"{book.get('title', '?')} | {book.get('author', '?')} | "
-            f"stock={stock} | isbn={book.get('isbn', '')}"
+            f"format={book.get('format', '?')} | stock={stock} | isbn={book.get('isbn', '')}"
         )
     return "\n".join(lines)
+
+
+def _norm_text(value: Any) -> str:
+    return " ".join(str(value or "").lower().split())
+
+
+def pick_in_stock_sku(
+    inventory: list[dict[str, Any]],
+    *,
+    title: str,
+    author: str,
+    preferred_isbn: str | None = None,
+    preferred_format: str | None = None,
+) -> dict[str, Any] | None:
+    """Choose a real in-stock SKU. Title can be in stock as paperback while hardcover does not exist."""
+    want_title = _norm_text(title)
+    want_author = _norm_text(author)
+
+    def in_stock(book: dict[str, Any]) -> bool:
+        try:
+            return int(book.get("stock") or 0) > 0
+        except (TypeError, ValueError):
+            return False
+
+    same_title = [
+        book
+        for book in inventory
+        if in_stock(book) and _norm_text(book.get("title")) == want_title
+    ]
+    if want_author:
+        same_title = [
+            book for book in same_title if want_author in _norm_text(book.get("author"))
+        ]
+    same_author = [
+        book
+        for book in inventory
+        if in_stock(book) and want_author and want_author in _norm_text(book.get("author"))
+    ]
+    pool = same_title or same_author
+    if not pool:
+        return None
+
+    if preferred_isbn:
+        for book in pool:
+            if str(book.get("isbn") or "") == str(preferred_isbn):
+                return book
+    if preferred_format:
+        want_fmt = _norm_text(preferred_format)
+        for book in pool:
+            if _norm_text(book.get("format")) == want_fmt:
+                return book
+    for fmt in FORMAT_PREFERENCE:
+        for book in pool:
+            if _norm_text(book.get("format")) == fmt:
+                return book
+    return pool[0]
+
+
+def restock_solicitation(title: str, author: str) -> str:
+    return (
+        f"Hey, looks like {title} by {author} is back in stock — "
+        "want me to put in an order for you?"
+    )
 
 
 def traces_search_blob(traces: list[dict[str, Any]]) -> str:
@@ -589,8 +710,9 @@ def find_restock_offer(
 
 Rules:
 - Offer ONLY if prior traces or this chat show the customer asked about a book or author that was out of stock (waitlist, "when is it back", "sold out", agent said out of stock).
-- Then check the inventory snapshot. If that title is now in stock, offer it.
-- If that exact title is still out, offer another in-stock title by the SAME author.
+- Each inventory row is one format/SKU. Offer only a row with stock > 0. Never pick a format that is missing or stock=0.
+- If that title is now in stock in any format, offer that title (the runtime will pick an in-stock ISBN).
+- If that exact title is still out in every format, offer another in-stock title by the SAME author.
 - If nothing matches, should_offer=false. Do not invent interest.
 - Do not offer just because they placed an order — it must be an availability / out-of-stock ask.
 """
@@ -598,7 +720,7 @@ Rules:
     prompt = (
         f"## Current conversation\n{current_convo or '(empty)'}\n\n"
         f"## Prior agent traces for this caller\n{compact_traces(traces)}\n\n"
-        f"## Live inventory snapshot (title | author | stock | isbn)\n{compact_inventory(inventory)}"
+        f"## Live inventory snapshot (title | author | format | stock | isbn)\n{compact_inventory(inventory)}"
     )
 
     response = client.messages.create(
@@ -623,33 +745,24 @@ Rules:
     if not title or not author:
         return None
 
-    solicitation = _write_solicitation(client, model=model, title=title, author=author)
-    return RestockOffer(
+    sku = pick_in_stock_sku(
+        inventory,
         title=title,
         author=author,
-        isbn=(match.get("isbn") or None),
-        stock=match.get("stock"),
+        preferred_isbn=(match.get("isbn") or None),
+        preferred_format=(match.get("format") or None),
+    )
+    if not sku:
+        return None
+
+    picked_title = str(sku.get("title") or title)
+    picked_author = str(sku.get("author") or author)
+    return RestockOffer(
+        title=picked_title,
+        author=picked_author,
+        isbn=str(sku.get("isbn") or "") or None,
+        format=str(sku.get("format") or "") or None,
+        stock=sku.get("stock"),
         reason=str(match.get("reason", "")),
-        solicitation=solicitation,
+        solicitation=restock_solicitation(picked_title, picked_author),
     )
-
-
-def _write_solicitation(
-    client: anthropic.Anthropic,
-    *,
-    model: str,
-    title: str,
-    author: str,
-) -> str:
-    response = client.messages.create(
-        model=model,
-        max_tokens=80,
-        system=(
-            "Write ONE voice-friendly sentence (no markdown) offering a restocked Bookly title. "
-            "Direct, not pushy. Name the title and author. Ask if they want to buy. "
-            "Do not apologize or add filler."
-        ),
-        messages=[{"role": "user", "content": f"Title: {title}\nAuthor: {author}"}],
-    )
-    text = "".join(block.text for block in response.content if block.type == "text").strip()
-    return text or f"{title} by {author} is back in stock — want me to put a copy on an order for you?"
