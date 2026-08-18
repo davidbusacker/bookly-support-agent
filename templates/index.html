@@ -333,6 +333,7 @@ function peekEmoji(text) {
   if (t.includes('reship')) return '🚚';
   if (t.includes('address')) return '🏠';
   if (t.includes('password')) return '🔑';
+  if (t.includes('placing restock order')) return '🛒';
   if (t.includes('restock match')) return '✨';
   if (t.includes('no restock')) return '📭';
   if (t.includes('restock') || t.includes('checking prior traces')) return '🛒';
@@ -474,7 +475,11 @@ async function sendMessage(text, retried = false) {
           ensureAgent();
           full = ev.reply || full;
           agentDiv.textContent = full;
-          if (ev.restock_offer) {
+          } else if (ev.guardrail === 'restock_ordered') {
+            finishPeek('Restock order placed');
+          } else if (ev.guardrail === 'restock_declined') {
+            finishPeek('Restock declined');
+          } else if (ev.restock_offer) {
             finishPeek('Restock offer attached');
           } else if (ev.guardrail === 'resolution_confirm') {
             finishPeek('Waiting on customer confirm');
