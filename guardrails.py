@@ -1,15 +1,6 @@
 """
-Orchestrator guardrails — not agent skills.
-
-These run around Riley's turn in app.py. They are never on TOOLS_SCHEMA.
-Riley cannot skip them or call them as tools.
-
-  Intent      — before the turn; <50% confidence → clarify, do not guess
-  Resolution  — after the reply; ≥90% → ask the customer to confirm
-  Restock     — only after confirm; prior OOS ask + live inventory match
-
-Classifiers use CLASSIFIER_MODEL (Haiku) with forced tool_choice.
-Skills (verify_phone, read_aop) live in skills.py.
+Orchestrator classifiers (Haiku): intent before Riley, resolution after, restock only after confirm.
+Not on TOOLS_SCHEMA — pipeline.py calls these; Riley cannot skip or invoke them as tools.
 """
 
 from __future__ import annotations
@@ -60,7 +51,7 @@ def _history_lines(history: list | None, limit: int = 8, *, max_chars: int = 300
 
 
 # ---------------------------------------------------------------------------
-# Intent — classify before each turn; clarify when confidence < 50%
+# Intent — classify before each turn. The loop (pipeline.py) owns the cutoff.
 # ---------------------------------------------------------------------------
 
 INTENT_LABELS = (
@@ -87,7 +78,7 @@ CLASSIFY_TOOL: dict[str, Any] = {
             },
             "confidence": {
                 "type": "number",
-                "description": "0.0–1.0. Use high scores (0.85+) when the ask is clear.",
+                "description": "0.0–1.0 how sure you are of this intent. Do not apply a pass/fail cutoff.",
             },
             "reasoning": {
                 "type": "string",
@@ -104,17 +95,17 @@ CLASSIFY_SYSTEM = """You classify customer messages for Bookly bookstore support
 Judge intent from the FULL conversation, not the latest message alone.
 Short replies that answer the agent's last question inherit that topic with HIGH confidence.
 
-Examples:
-- "Where is order BK-10001?" → order_status, 0.95
-- Agent asked for last 4 of phone; customer says "9876" → keep prior intent (often order_status / return_refund), 0.90+
-- Agent asked for order number; customer says "BK-10005" → keep prior intent, 0.90+
-- "I want to return a damaged book" → return_refund, 0.92
-- "Hi" or "Hello" → greeting, 0.90
-- "What's your return policy?" → policy_question, 0.90
+Report a 0–1 confidence for how sure you are. The orchestrator—not you—decides whether that is high enough to proceed. Do not treat any number as a pass/fail cutoff.
 
-Reserve confidence BELOW 0.50 only when the conversation still has no usable topic, e.g.:
-- First message is only "help", "something is wrong", "idk", "???"
-- Random unrelated text with no support context and no prior thread
+Examples:
+- "Where is order BK-10001?" → order_status, high confidence
+- Agent asked for last 4 of phone; customer says "9876" → keep prior intent (often order_status / return_refund), high confidence
+- Agent asked for order number; customer says "BK-10005" → keep prior intent, high confidence
+- "I want to return a damaged book" → return_refund, high confidence
+- "Hi" or "Hello" → greeting, high confidence
+- "What's your return policy?" → policy_question, high confidence
+- First message is only "help", "something is wrong", "idk", "???" → unclear, low confidence
+- Random unrelated text with no support context and no prior thread → unclear, low confidence
 
 Never treat identity answers (last 4, order id, email) as unclear if the agent just asked for them."""
 
@@ -125,16 +116,11 @@ class IntentResult:
     confidence: float
     reasoning: str
 
-    @property
-    def needs_clarification(self) -> bool:
-        return self.confidence < 0.50
-
     def as_dict(self) -> dict[str, Any]:
         return {
             "intent": self.intent,
             "confidence": round(self.confidence, 3),
             "reasoning": self.reasoning,
-            "needs_clarification": self.needs_clarification,
         }
 
 
@@ -183,7 +169,7 @@ def classify_intent(
     return IntentResult(intent="unclear", confidence=0.0, reasoning="Classification failed.")
 
 
-CLARIFY_PROMPT = """The customer's intent is unclear (confidence below 50%).
+CLARIFY_PROMPT = """The orchestrator flagged this turn as too unclear to send to the support agent.
 Write ONE short clarifying question (~15–25 words, voice-friendly, no markdown).
 Ask whether they need help with an order, return/refund, shipping, account, or something else.
 If recent conversation already shows a clear topic, do NOT ignore it — ask a question that fits that thread."""
@@ -218,7 +204,7 @@ def build_clarification_reply(
 
 
 # ---------------------------------------------------------------------------
-# Resolution — score after each reply; ≥90% asks the customer to confirm
+# Resolution — score after each reply. The loop (pipeline.py) owns the cutoff.
 # ---------------------------------------------------------------------------
 
 RESOLVE_TOOL: dict[str, Any] = {
@@ -229,7 +215,7 @@ RESOLVE_TOOL: dict[str, Any] = {
         "properties": {
             "resolution_score": {
                 "type": "number",
-                "description": "0.0–1.0. Use 0.90+ only when nothing remains for this request.",
+                "description": "0.0–1.0 how fully the original request is handled. Do not apply a pass/fail cutoff.",
             },
             "reasoning": {
                 "type": "string",
@@ -243,7 +229,9 @@ RESOLVE_TOOL: dict[str, Any] = {
 
 RESOLVE_SYSTEM = """You score whether Bookly support has fully handled the customer's request.
 
-High score (0.90–1.0) only when:
+Report a 0–1 score. The orchestrator—not you—decides whether that is high enough to close out. Do not treat any number as a pass/fail cutoff.
+
+High only when:
 - The asked-for action is done (status given, return opened, refund issued, policy answered), AND
 - You are not waiting on the customer (no pending last-4, order number, or clarification).
 
@@ -254,7 +242,7 @@ Keep the score LOW when:
 - You asked a question and are waiting
 - The customer just said "thanks" but you never actually resolved anything this chat
 
-Be conservative. 0.90+ means "we took care of everything they asked." """
+Be conservative: high means we took care of everything they asked."""
 
 
 WRITE_TOOLS = frozenset(
@@ -293,15 +281,10 @@ class ResolutionResult:
     score: float
     reasoning: str
 
-    @property
-    def is_resolved(self) -> bool:
-        return self.score >= 0.90
-
     def as_dict(self) -> dict[str, Any]:
         return {
             "resolution_score": round(self.score, 3),
             "reasoning": self.reasoning,
-            "is_resolved": self.is_resolved,
         }
 
 

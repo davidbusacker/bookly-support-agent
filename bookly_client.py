@@ -1,8 +1,6 @@
 """
-Bookly client — MCP (primary) with REST manifest fallback.
-
-Production path: JSON-RPC to Bookly's Streamable HTTP MCP server.
-Fallback: tools.json catalog + REST, if MCP is down.
+Talks to Bookly's live store API: MCP JSON-RPC first, REST tools.json if MCP is down.
+tools.py calls execute_tool here after the auth ACL; this module does not know about Riley or AOPs.
 """
 
 from __future__ import annotations
@@ -25,6 +23,13 @@ CACHED_MANIFEST_PATH = Path(__file__).resolve().parent / "data" / "bookly_tools.
 _PATH_HINT = "Path segment"
 _QUERY_HINT = "Query parameter"
 
+# Bookly's MCP schema for these writes is wrong (append messages typed as
+# strings; log requires per-message confidences). REST still accepts the
+# original payload — use it so admin traces actually persist.
+TRACE_WRITE_TOOLS = frozenset(
+    {"log_agent_trace", "append_agent_trace_messages", "update_agent_trace"}
+)
+
 
 class BooklyClient:
     """Talk to Bookly OMS tools. Prefer MCP; fall back to REST."""
@@ -46,6 +51,7 @@ class BooklyClient:
         self.timeout = timeout_seconds
         self._tools = tools
         self._tools_by_name: dict[str, dict[str, Any]] = {t["name"]: t for t in tools}
+        self._rest: BooklyClient | None = None
 
     @classmethod
     def from_env(cls) -> "BooklyClient":
@@ -76,12 +82,23 @@ class BooklyClient:
         tools = (listed.get("result") or {}).get("tools") or []
         if not tools:
             raise RuntimeError("MCP tools/list returned no tools")
-        return cls(
+        client = cls(
             transport="mcp",
             tools=tools,
             instructions=result.get("instructions") or "",
             mcp_url=mcp_url,
         )
+        rest = cls._from_rest()
+        client._rest = rest
+        for name in TRACE_WRITE_TOOLS:
+            rest_tool = rest._tools_by_name.get(name)
+            if rest_tool and rest_tool.get("http"):
+                client._tools_by_name[name] = {
+                    **client._tools_by_name.get(name, {}),
+                    "http": rest_tool["http"],
+                    "inputSchema": rest_tool.get("inputSchema") or {},
+                }
+        return client
 
     @classmethod
     def _from_rest(cls) -> "BooklyClient":
@@ -108,8 +125,12 @@ class BooklyClient:
         return anthropic_tools
 
     def execute_tool(self, name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
-        if name not in self._tools_by_name:
+        if name not in self._tools_by_name and not (
+            self._rest and name in self._rest._tools_by_name
+        ):
             return {"ok": False, "error": f"Unknown tool '{name}'."}
+        if name in TRACE_WRITE_TOOLS and self._rest is not None:
+            return self._rest._execute_rest(name, tool_input or {})
         if self.transport == "mcp":
             return self._execute_mcp(name, tool_input or {})
         return self._execute_rest(name, tool_input or {})

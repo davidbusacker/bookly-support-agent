@@ -1,3 +1,9 @@
+---
+title: Returns and Refunds
+description: Call before creating a return, issuing a refund, or cancelling an order. Check eligibility first; refund after Bookly receives the return unless a loyalty AOP applies.
+startup: false
+---
+
 # AOP — Returns and Refunds
 
 ## Standard path (default)

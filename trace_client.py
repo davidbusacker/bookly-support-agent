@@ -1,9 +1,6 @@
 """
-Agent trace logging — syncs every turn to Bookly admin traces.
-
-Live API: https://bookly.davidbusacker.com/admin/agent-traces
-MCP tools: log_agent_trace, append_agent_trace_messages, update_agent_trace,
-           list_agent_traces, get_agent_trace
+Bookly agent-trace API helpers: start/append/update traces and look up prior chats by email/order.
+agent/traces.py uses this on a thread pool; write-trace tools are hidden from Riley's tool menu.
 """
 
 from __future__ import annotations
@@ -59,6 +56,8 @@ def trace_message(
     msg: dict[str, Any] = {
         "role": role,
         "occurred_at": occurred_at or utc_now(),
+        "intent_confidence": float((metadata or {}).get("intent_confidence") or 0.0),
+        "resolution_confidence": float((metadata or {}).get("resolution_confidence") or 0.0),
     }
     if content:
         msg["content"] = content
@@ -119,6 +118,10 @@ class TraceClient:
             payload["intent"] = intent
         if metadata:
             payload["metadata"] = metadata
+            if metadata.get("intent_confidence") is not None:
+                payload["intent_confidence"] = metadata["intent_confidence"]
+        payload.setdefault("intent_confidence", 0.0)
+        payload.setdefault("resolution_confidence", 0.0)
         return self.bookly.execute_tool("log_agent_trace", payload)
 
     def append_messages(

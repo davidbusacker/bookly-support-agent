@@ -1,4 +1,8 @@
-"""Verify Anthropic API key from .env without printing secrets."""
+"""
+Smoke-test that ANTHROPIC_API_KEY in .env can reach Claude, without printing the key.
+Not part of the agent loop — run manually when wiring credentials.
+"""
+
 from dotenv import load_dotenv
 import os
 import sys

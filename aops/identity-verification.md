@@ -1,3 +1,9 @@
+---
+title: Identity Verification
+description: Always loaded. Lookup is order number or email; authentication is last 4 of phone. Call verify_phone_last_four before revealing account data.
+startup: true
+---
+
 # AOP — Identity Verification
 
 ## Rule

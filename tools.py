@@ -1,10 +1,6 @@
 """
-Tool dispatch — Bookly MCP manifest + AOP/skills layer.
-
-Business rules: aops/*.md (Agent Operating Policies)
-Execution: bookly_client.py (MCP to Bookly, REST fallback)
-Skills: skills.py (verify_phone, read_aop)
-Hard guardrail: account/PII tools blocked until session.authenticated.
+The door for every Riley tool call: local skills plus Bookly MCP, with an auth ACL.
+Account/PII Bookly tools hard-fail until session.authenticated; public catalog/FAQ tools do not.
 """
 
 from __future__ import annotations

@@ -1,3 +1,9 @@
+---
+title: Loyalty Early Refund
+description: Call only when the customer explicitly asks for money back before mailing the book. Eligible if 3+ non-cancelled orders in the last 365 days.
+startup: false
+---
+
 # AOP — Loyalty Early Refund
 
 ## What it is

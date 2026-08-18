@@ -1,8 +1,6 @@
 """
-Prepare agent reply text for ElevenLabs TTS.
-
-Claude often returns markdown (bold, bullets, order IDs like BK-10001).
-Fed raw into TTS, that causes misreads, pauses, and audio hallucinations.
+Cleans Riley's reply before ElevenLabs speaks it (strip markdown, read BK-10001 as 'order 10001').
+Used only by the /api/tts route in _infra/server.py.
 """
 
 import re
