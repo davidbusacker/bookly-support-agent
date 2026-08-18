@@ -475,7 +475,7 @@ async function sendMessage(text, retried = false) {
           ensureAgent();
           full = ev.reply || full;
           agentDiv.textContent = full;
-          } else if (ev.guardrail === 'restock_ordered') {
+          if (ev.guardrail === 'restock_ordered') {
             finishPeek('Restock order placed');
           } else if (ev.guardrail === 'restock_declined') {
             finishPeek('Restock declined');
