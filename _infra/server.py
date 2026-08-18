@@ -1,10 +1,14 @@
-"""Flask HTTP layer — routes only; agent logic lives in agent/."""
+"""
+Flask routes: session create, chat stream, TTS, health, and the chat page.
+Calls agent.pipeline.chat_events for each customer message; does not decide refunds or policy.
+"""
 
 from __future__ import annotations
 
 import logging
 import os
 import uuid
+from pathlib import Path
 
 from elevenlabs import ElevenLabs, VoiceSettings
 from flask import Flask, Response, jsonify, render_template, request, stream_with_context
@@ -20,7 +24,8 @@ from agent.session import SESSIONS, Session, refresh_caller_history, update_call
 from tools import TOOLS_SCHEMA, get_bookly_client, ping_bookly
 from tts_utils import prepare_text_for_speech
 
-app = Flask(__name__)
+ROOT = Path(__file__).resolve().parent.parent
+app = Flask(__name__, template_folder=str(ROOT / "templates"))
 
 ELEVEN_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "EXAVITQu4vr4xnSDxMaL")
 ELEVEN_MODEL_ID = os.environ.get("ELEVENLABS_MODEL", "eleven_multilingual_v2")

@@ -257,6 +257,7 @@
 
 <script>
 let sessionId = null;
+let sessionReady = false;
 let isSending = false;
 let currentAudio = null;
 let peekTurn = 0;
@@ -293,8 +294,8 @@ function removeTyping() {
 
 function setSending(active) {
   isSending = active;
-  sendBtn.disabled = active;
-  textInput.disabled = active;
+  sendBtn.disabled = active || !sessionReady;
+  textInput.disabled = active || !sessionReady;
 }
 
 function beginPeekTurn() {
@@ -371,19 +372,36 @@ function finishPeek(label) {
   }
 }
 
-async function initSession() {
+async function initSession({ greet = false } = {}) {
+  sessionReady = false;
+  setSending(false);
   const res = await fetch('/api/session', { method: 'POST' });
   const data = await res.json();
+  if (!data.session_id) {
+    throw new Error('Could not start session');
+  }
   sessionId = data.session_id;
+  sessionReady = true;
+  setSending(false);
 
-  const greeting = "Hey! Riley from Bookly support — what's up?";
-  addMessage('agent', greeting);
-  if (voiceToggle.checked) speak(greeting);
+  if (greet) {
+    const greeting = "Hey! Riley from Bookly support — what's up?";
+    addMessage('agent', greeting);
+    if (voiceToggle.checked) speak(greeting);
+  }
 }
 
-async function sendMessage(text) {
+async function sendMessage(text, retried = false) {
   const trimmed = text.trim();
   if (!trimmed || isSending) return;
+  if (!sessionReady || !sessionId) {
+    try {
+      await initSession();
+    } catch (err) {
+      addMessage('error', 'Error: could not start session');
+      return;
+    }
+  }
 
   setSending(true);
   addMessage('user', trimmed);
@@ -403,6 +421,11 @@ async function sendMessage(text) {
       const data = await res.json();
       removeTyping();
       if (data.error) {
+        if (!retried && data.error.includes('session_id')) {
+          finishPeek('Session expired — reconnecting');
+          await initSession();
+          return sendMessage(trimmed, true);
+        }
         addMessage('error', 'Error: ' + data.error);
         finishPeek('Error');
         return;
@@ -519,7 +542,8 @@ composer.addEventListener('submit', (e) => {
   sendMessage(text);
 });
 
-initSession();
+setSending(false);
+initSession({ greet: true }).catch(() => addMessage('error', 'Error: could not start session'));
 </script>
 </body>
 </html>

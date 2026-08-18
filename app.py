@@ -1,4 +1,7 @@
-"""Bookly Support Agent — entry point. Agent logic: agent/ ; HTTP: _infra/server.py"""
+"""
+Flask process entry point: `python app.py` starts the support agent on port 5050.
+Riley's turn logic lives in agent/; HTTP routes live in _infra/server.py.
+"""
 
 from _infra.server import app
 

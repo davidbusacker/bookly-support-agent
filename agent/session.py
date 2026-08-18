@@ -1,4 +1,7 @@
-"""Per-tab session state, caller identity, and Claude system prompt assembly."""
+"""
+In-memory Session for one browser tab: messages, auth, order/email, restock flags.
+Builds the per-turn system prompt (AOP briefing + caller history + authenticated yes/no).
+"""
 
 from __future__ import annotations
 

@@ -1,7 +1,6 @@
 """
-Turn orchestration — read chat_events() top-to-bottom for the full pipeline.
-
-  classify intent → log trace → closeout | clarify | agent loop → resolution/restock
+One customer message: intent → trace → (clarify | Riley loop) → resolution/restock.
+This is the orchestrator; chat_events() is the function to read top-to-bottom.
 """
 
 from __future__ import annotations
@@ -46,6 +45,12 @@ def ndjson(payload: dict[str, Any]) -> str:
 
 def peek(text: str) -> str:
     return ndjson({"type": "status", "text": text})
+
+
+def _intent_payload(intent: IntentResult) -> dict[str, Any]:
+    data = intent.as_dict()
+    data["needs_clarification"] = intent.confidence < INTENT_CONFIDENCE_THRESHOLD
+    return data
 
 
 def maybe_restock_offer(session: Session) -> dict[str, Any] | None:
@@ -162,7 +167,8 @@ def chat_events(session: Session, session_id: str, user_message: str):
             yield from confirmed_resolution_events(session, user_message, intent_result, confirm)
             return
 
-    if intent_result.needs_clarification:
+    # Sole intent cutoff — classifiers report 0–1; they do not apply this number.
+    if intent_result.confidence < INTENT_CONFIDENCE_THRESHOLD:
         yield peek("Intent unclear — asking a clarifying question")
         reply_text = build_clarification_reply(
             anthropic_client,
@@ -190,7 +196,7 @@ def chat_events(session: Session, session_id: str, user_message: str):
             {
                 "type": "done",
                 "reply": reply_text,
-                "intent": intent_result.as_dict(),
+                "intent": _intent_payload(intent_result),
                 "guardrail": "intent_clarification",
                 "trace_id": session.trace_id,
                 "trace_number": session.trace_number,
@@ -247,7 +253,9 @@ def chat_events(session: Session, session_id: str, user_message: str):
         )
         session.last_resolution = resolution.score
         resolution_payload = resolution.as_dict()
+        resolution_payload["is_resolved"] = resolution.score >= RESOLUTION_THRESHOLD
         yield peek(f"Resolution {resolution.score:.0%}")
+        # Sole resolution cutoff — classifiers report 0–1; they do not apply this number.
         if (
             resolution.score >= RESOLUTION_THRESHOLD
             and not session.restock_offered
@@ -311,7 +319,7 @@ def chat_events(session: Session, session_id: str, user_message: str):
         {
             "type": "done",
             "reply": reply_text,
-            "intent": intent_result.as_dict(),
+            "intent": _intent_payload(intent_result),
             "resolution": resolution_payload,
             "restock_offer": restock_payload,
             "guardrail": (
@@ -368,7 +376,7 @@ def confirmed_resolution_events(
         {
             "type": "done",
             "reply": reply_text,
-            "intent": intent_result.as_dict(),
+            "intent": _intent_payload(intent_result),
             "resolution": {"resolution_score": session.last_resolution, "is_resolved": True},
             "restock_offer": restock,
             "guardrail": "restock_offer" if restock else "resolution_confirmed",

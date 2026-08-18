@@ -1,4 +1,7 @@
-"""Bookly admin trace create/append — runs on a background thread pool."""
+"""
+Writes this chat to Bookly admin traces in the background (create, append, update).
+Used by pipeline.py so staff can replay what Riley said; not shown to the customer.
+"""
 
 from __future__ import annotations
 

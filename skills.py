@@ -1,7 +1,6 @@
 """
-Thin skills — executable helpers referenced by AOPs. Not business policy.
-
-Policy lives in aops/*.md; skills only do deterministic checks the LLM cannot safely do alone.
+Local skills Riley can call: read_aop and verify_phone_last_four (pass/fail only).
+AOPs name these; tools.py dispatches them. Not Bookly MCP and not guardrails.
 """
 
 import re

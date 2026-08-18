@@ -1,14 +1,6 @@
 """
-Claude tool-use loop — stream one turn, run tools, repeat until end_turn.
-
-Called from pipeline.chat_events() after intent passes and the user message
-is appended to session.messages. This is Riley's "brain" for one customer turn.
-
-Flow (run_agent_turn):
-  1. Trim old tool outputs so context stays small
-  2. Loop: call Claude with AOPs + caller context + full message history
-  3. If Claude wants tools → execute each, append results, loop again
-  4. If Claude replies with text → stream done, return final reply + tool list
+Riley's tool-use loop for one turn: stream Claude, run tools via tools.py, repeat until text.
+Called from pipeline.chat_events after intent passes; compact_history trims old tool JSON first.
 """
 
 from __future__ import annotations

@@ -1,4 +1,7 @@
-"""Shared models, API clients, and thresholds."""
+"""
+Shared clients and knobs: models, Bookly trace client, and the sole intent/resolution cutoffs.
+Pipeline.py compares to INTENT_CONFIDENCE_THRESHOLD and RESOLUTION_THRESHOLD; classifiers do not.
+"""
 
 from __future__ import annotations
 

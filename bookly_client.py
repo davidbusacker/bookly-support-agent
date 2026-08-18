@@ -1,8 +1,6 @@
 """
-Bookly client — MCP (primary) with REST manifest fallback.
-
-Production path: JSON-RPC to Bookly's Streamable HTTP MCP server.
-Fallback: tools.json catalog + REST, if MCP is down.
+Talks to Bookly's live store API: MCP JSON-RPC first, REST tools.json if MCP is down.
+tools.py calls execute_tool here after the auth ACL; this module does not know about Riley or AOPs.
 """
 
 from __future__ import annotations

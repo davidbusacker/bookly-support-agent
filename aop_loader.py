@@ -1,17 +1,6 @@
 """
-Load Agent Operating Policies (AOPs) from markdown files.
-
-Each aops/*.md file (except README) carries YAML frontmatter:
-
-    ---
-    title: Short name
-    description: When to load this policy, in one or two sentences.
-    startup: true   # optional; default false. Full text goes in the system prompt.
-    ---
-
-The system prompt always includes a catalog of every AOP (title + description).
-Startup AOPs are also inlined in full. Adding a new file is enough — do not
-edit core.md or a hardcoded ID list.
+Reads aops/*.md, builds the system-prompt catalog (title + when to load), inlines startup policies.
+Adding a policy is a new markdown file with frontmatter; format_aop_catalog() is what Claude sees.
 """
 
 from __future__ import annotations
