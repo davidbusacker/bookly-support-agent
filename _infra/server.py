@@ -14,9 +14,9 @@ from elevenlabs import ElevenLabs, VoiceSettings
 from flask import Flask, Response, jsonify, render_template, request, stream_with_context
 
 from agent.config import (
-    ANTHROPIC_MODEL,
     CLASSIFIER_MODEL,
     INTENT_CONFIDENCE_THRESHOLD,
+    OPENAI_MODEL,
     RESOLUTION_THRESHOLD,
 )
 from agent.pipeline import chat_events, ndjson
@@ -49,9 +49,9 @@ def health():
     return jsonify(
         {
             "status": "ok",
-            "anthropic_configured": bool(os.environ.get("ANTHROPIC_API_KEY")),
+            "openai_configured": bool(os.environ.get("OPENAI_API_KEY")),
             "elevenlabs_configured": bool(os.environ.get("ELEVENLABS_API_KEY")),
-            "model": ANTHROPIC_MODEL,
+            "model": OPENAI_MODEL,
             "classifier_model": CLASSIFIER_MODEL,
             "intent_threshold": INTENT_CONFIDENCE_THRESHOLD,
             "resolution_threshold": RESOLUTION_THRESHOLD,
@@ -80,8 +80,8 @@ def chat():
         return jsonify({"error": "Unknown or missing session_id. Call /api/session first."}), 400
     if not user_message:
         return jsonify({"error": "Empty message."}), 400
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        return jsonify({"error": "ANTHROPIC_API_KEY is not set."}), 500
+    if not os.environ.get("OPENAI_API_KEY"):
+        return jsonify({"error": "OPENAI_API_KEY is not set."}), 500
 
     session = SESSIONS[session_id]
     identity_changed = update_caller_identity(session, user_message)

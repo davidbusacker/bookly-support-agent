@@ -20,17 +20,17 @@ const CARDS: Array<{ q: string; a: string; proof: string }> = [
   },
   {
     q: "2. Walk me through one customer turn. What runs before Riley speaks?",
-    a: "The browser hits /api/chat. The server loads the Session, refreshes prior-trace summaries, then chat_events classifies intent (Haiku). If confidence is below the env cutoff, Riley never runs — a clarifying question is generated instead. Otherwise the new user line is appended to session.messages and run_agent_turn starts the Claude tool loop. After she replies, the orchestrator may score resolution and ask if everything is resolved. Restock only happens after confirm.",
+    a: "The browser hits /api/chat. The server loads the Session, refreshes prior-trace summaries, then chat_events classifies intent (gpt-4o-mini). If confidence is below the env cutoff, Riley never runs — a clarifying question is generated instead. Otherwise the new user line is appended to session.messages and run_agent_turn starts the OpenAI tool loop. After she replies, the orchestrator may score resolution and ask if everything is resolved. Restock only happens after confirm.",
     proof: "_infra/server.py chat() → agent/pipeline.py chat_events() → agent/loop.py run_agent_turn()",
   },
   {
     q: "3. What is a tool-use loop, and when does it stop?",
-    a: "Riley does not call Bookly herself. She requests a tool name. run_agent_turn sends history + system prompt + TOOLS_SCHEMA to Claude. If stop reason is tool_use, tools.py runs each call, appends JSON as tool_result, and Claude is called again. That repeats until Claude returns plain text. The peek panel is those inner steps, not extra models.",
-    proof: "agent/loop.py — while True, stop_reason == tool_use, execute_tool",
+    a: "Riley does not call Bookly herself. She requests a tool name. run_agent_turn sends history + system prompt + TOOLS_SCHEMA to OpenAI. If finish_reason is tool_calls, tools.py runs each call, appends a tool message, and OpenAI is called again. That repeats until the model returns plain text. The peek panel is those inner steps, not extra models.",
+    proof: "agent/loop.py — while True, finish_reason == tool_calls, execute_tool",
   },
   {
     q: "4. How do you stop the model from leaking account data before verification?",
-    a: "Two layers. The identity AOP tells her not to reveal data until last-4 matches. The runtime blocks get_order, refunds, and similar tools until session.authenticated is true, returning authentication_required. Public tools (policies, FAQs, catalog, read_aop, verify_phone_last_four) stay allowed. Phone verify is a skill that returns only pass/fail; Claude never sees the phone number.",
+    a: "Two layers. The identity AOP tells her not to reveal data until last-4 matches. The runtime blocks get_order, refunds, and similar tools until session.authenticated is true, returning authentication_required. Public tools (policies, FAQs, catalog, read_aop, verify_phone_last_four) stay allowed. Phone verify is a skill that returns only pass/fail; the model never sees the phone number.",
     proof: "aops/identity-verification.md · tools.py PUBLIC_TOOLS + execute_tool · skills.py verify_phone_last_four",
   },
   {
@@ -45,7 +45,7 @@ const CARDS: Array<{ q: string; a: string; proof: string }> = [
   },
   {
     q: "7. Where is the 50% / 90% cutoff actually enforced?",
-    a: "Only in the loop. Haiku reports a 0–1 intent confidence and a 0–1 resolution score; prompts tell it not to apply a pass/fail cutoff. pipeline.py compares those numbers to INTENT_CONFIDENCE_THRESHOLD and RESOLUTION_THRESHOLD from .env / agent/config.py. Changing the env var changes behavior. Riley’s AOPs do not re-state 50% or 90%.",
+    a: "Only in the loop. gpt-4o-mini reports a 0–1 intent confidence and a 0–1 resolution score; prompts tell it not to apply a pass/fail cutoff. pipeline.py compares those numbers to INTENT_CONFIDENCE_THRESHOLD and RESOLUTION_THRESHOLD from .env / agent/config.py. Changing the env var changes behavior. Riley’s AOPs do not re-state 50% or 90%.",
     proof: "agent/pipeline.py (confidence < INTENT_CONFIDENCE_THRESHOLD, score >= RESOLUTION_THRESHOLD) · agent/config.py",
   },
   {
@@ -55,13 +55,13 @@ const CARDS: Array<{ q: string; a: string; proof: string }> = [
   },
   {
     q: "9. What does the model remember next turn?",
-    a: "Same-tab memory is session.messages: old user and assistant turns plus tool calls. That whole list is passed into the next Claude call. Old tool JSON is trimmed (compact_history keeps the last two results). Auth, email, and order sit on the Session object and are re-injected in system_prompt(). Other Bookly conversations are a second channel: refresh_caller_history loads prior traces into caller_history on the system prompt, not as this tab’s transcript.",
+    a: "Same-tab memory is session.messages: old user and assistant turns plus tool calls. That whole list is passed into the next OpenAI call. Old tool JSON is trimmed (compact_history keeps the last two results). Auth, email, and order sit on the Session object and are re-injected in system_prompt(). Other Bookly conversations are a second channel: refresh_caller_history loads prior traces into caller_history on the system prompt, not as this tab’s transcript.",
     proof: "agent/pipeline.py append + run_agent_turn(session.messages) · agent/loop.py compact_history · agent/session.py system_prompt / refresh_caller_history",
   },
   {
     q: "10. If Bookly adds a new API, or you add a new policy, what do you change?",
     a: "New store capability: it appears on Bookly MCP; bookly_client.py lists it into TOOLS_SCHEMA after restart (unless you also need it on PUBLIC_TOOLS). New support policy: add aops/something.md with title / description frontmatter; the catalog and read_aop enum update from the files — you do not edit core.md as an index. A new “must never skip” rule (like auth) still belongs in Python, not only markdown.",
-    proof: "aops/README.md · aop_loader.py · tools.py PUBLIC_TOOLS · bookly_client.py from_env / anthropic_tools()",
+    proof: "aops/README.md · aop_loader.py · tools.py PUBLIC_TOOLS · bookly_client.py from_env / chat_tools()",
   },
 ];
 

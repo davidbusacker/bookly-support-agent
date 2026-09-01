@@ -33,7 +33,7 @@ from agent.config import (
     CLASSIFIER_MODEL,
     INTENT_CONFIDENCE_THRESHOLD,
     RESOLUTION_THRESHOLD,
-    anthropic_client,
+    openai_client,
     trace_client,
 )
 from agent.loop import run_agent_turn
@@ -87,7 +87,7 @@ def maybe_restock_offer(session: Session) -> dict[str, Any] | None:
 
     inventory = fetch_inventory(execute_tool)
     offer = find_restock_offer(
-        anthropic_client,
+        openai_client,
         model=CLASSIFIER_MODEL,
         traces=traces,
         current_convo=convo,
@@ -121,7 +121,7 @@ def chat_events(session: Session, session_id: str, user_message: str):
     yield peek("Classifying intent")
 
     intent_result = classify_intent(
-        anthropic_client,
+        openai_client,
         model=CLASSIFIER_MODEL,
         user_message=user_message,
         history=session.messages,
@@ -174,7 +174,7 @@ def chat_events(session: Session, session_id: str, user_message: str):
         session.awaiting_resolution_confirm = False
         yield peek("Checking if they're done")
         confirm = classify_resolution_confirm(
-            anthropic_client,
+            openai_client,
             model=CLASSIFIER_MODEL,
             user_message=user_message,
         )
@@ -186,7 +186,7 @@ def chat_events(session: Session, session_id: str, user_message: str):
     if intent_result.confidence < INTENT_CONFIDENCE_THRESHOLD:
         yield peek("Intent unclear — asking a clarifying question")
         reply_text = build_clarification_reply(
-            anthropic_client,
+            openai_client,
             model=CLASSIFIER_MODEL,
             user_message=user_message,
             intent=intent_result,
@@ -261,7 +261,7 @@ def chat_events(session: Session, session_id: str, user_message: str):
     ):
         yield peek("Scoring resolution")
         resolution = score_resolution(
-            anthropic_client,
+            openai_client,
             model=CLASSIFIER_MODEL,
             history=session.messages,
             latest_reply=reply_text,

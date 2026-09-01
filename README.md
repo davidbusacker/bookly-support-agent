@@ -7,7 +7,7 @@ Conversational support agent for **Bookly**, built in a **Decagon-style AOP arch
 ```
 aops/*.md              Agent Operating Policies (title + description catalog; startup AOPs inlined)
   ↓ read at startup / via read_aop skill
-Claude (Riley)         Reasons over policies + customer context
+Riley (OpenAI)         Reasons over policies + customer context
   ↓ tool calls
 Bookly MCP API         Orders, returns, refunds (live backend)
   ↓
@@ -45,7 +45,7 @@ app.py                 Flask server + orchestration loop + TTS
 ./run.sh
 ```
 
-Open **http://127.0.0.1:5000** in Chrome for voice.
+Open **http://127.0.0.1:5050** in Chrome for voice.
 
 ## License
 

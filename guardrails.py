@@ -1,5 +1,5 @@
 """
-Orchestrator classifiers (Haiku): intent before Riley, resolution after, restock only after confirm.
+Orchestrator classifiers (gpt-4o-mini): intent before Riley, resolution after, restock only after confirm.
 Not on TOOLS_SCHEMA — pipeline.py calls these; Riley cannot skip or invoke them as tools.
 """
 
@@ -9,9 +9,10 @@ from dataclasses import dataclass
 from typing import Any, Callable
 import re
 
-import anthropic
+from openai import OpenAI
 
 from aop_loader import read_aop
+from llm import complete_text, complete_tool
 
 # ---------------------------------------------------------------------------
 # Shared
@@ -19,7 +20,7 @@ from aop_loader import read_aop
 
 
 def message_plain_text(content: Any) -> str:
-    """Flatten Anthropic message content (str, dict blocks, or SDK objects) to text."""
+    """Flatten chat message content (string, or leftover list/text blocks) to text."""
     if content is None:
         return ""
     if isinstance(content, str):
@@ -126,7 +127,7 @@ class IntentResult:
 
 
 def classify_intent(
-    client: anthropic.Anthropic,
+    client: OpenAI,
     *,
     model: str,
     user_message: str,
@@ -144,30 +145,26 @@ def classify_intent(
     else:
         prompt = f"Latest customer message: {user_message}"
 
-    response = client.messages.create(
+    data = complete_tool(
+        client,
         model=model,
-        max_tokens=256,
         system=CLASSIFY_SYSTEM,
-        tools=[CLASSIFY_TOOL],
-        tool_choice={"type": "tool", "name": "report_customer_intent"},
-        messages=[{"role": "user", "content": prompt}],
+        user=prompt,
+        tool=CLASSIFY_TOOL,
+        max_tokens=256,
     )
-
-    for block in response.content:
-        if block.type == "tool_use" and block.name == "report_customer_intent":
-            data = block.input
-            intent = data.get("intent", "unclear")
-            if intent not in INTENT_LABELS:
-                intent = "unclear"
-            confidence = float(data.get("confidence", 0.0))
-            confidence = max(0.0, min(1.0, confidence))
-            return IntentResult(
-                intent=intent,
-                confidence=confidence,
-                reasoning=str(data.get("reasoning", "")),
-            )
-
-    return IntentResult(intent="unclear", confidence=0.0, reasoning="Classification failed.")
+    if not data:
+        return IntentResult(intent="unclear", confidence=0.0, reasoning="Classification failed.")
+    intent = data.get("intent", "unclear")
+    if intent not in INTENT_LABELS:
+        intent = "unclear"
+    confidence = float(data.get("confidence", 0.0))
+    confidence = max(0.0, min(1.0, confidence))
+    return IntentResult(
+        intent=intent,
+        confidence=confidence,
+        reasoning=str(data.get("reasoning", "")),
+    )
 
 
 CLARIFY_PROMPT = """The orchestrator flagged this turn as too unclear to send to the support agent.
@@ -177,7 +174,7 @@ If recent conversation already shows a clear topic, do NOT ignore it — ask a q
 
 
 def build_clarification_reply(
-    client: anthropic.Anthropic,
+    client: OpenAI,
     *,
     model: str,
     user_message: str,
@@ -191,13 +188,13 @@ def build_clarification_reply(
         f"Latest customer message: {user_message}\n"
         f"Classifier note: {intent.reasoning}"
     )
-    response = client.messages.create(
+    text = complete_text(
+        client,
         model=model,
-        max_tokens=120,
         system=CLARIFY_PROMPT,
-        messages=[{"role": "user", "content": user_content}],
+        user=user_content,
+        max_tokens=120,
     )
-    text = "".join(block.text for block in response.content if block.type == "text").strip()
     return text or (
         "I want to make sure I help with the right thing — is this about an order, "
         "a return, shipping, or your account?"
@@ -263,7 +260,7 @@ WRITE_TOOLS = frozenset(
 
 
 def should_score_resolution(*, reply_text: str, tools_this_turn: list[str]) -> bool:
-    """Skip the extra Claude call while Riley is still asking a question."""
+    """Skip the extra classifier call while Riley is still asking a question."""
     if any(name in WRITE_TOOLS for name in tools_this_turn):
         return True
     text = (reply_text or "").strip()
@@ -290,7 +287,7 @@ class ResolutionResult:
 
 
 def score_resolution(
-    client: anthropic.Anthropic,
+    client: OpenAI,
     *,
     model: str,
     history: list,
@@ -298,23 +295,18 @@ def score_resolution(
 ) -> ResolutionResult:
     convo = "\n".join(_history_lines(history, limit=10, max_chars=400))
     prompt = f"Conversation so far:\n{convo}\n\nLatest agent reply:\n{latest_reply}"
-
-    response = client.messages.create(
+    data = complete_tool(
+        client,
         model=model,
-        max_tokens=256,
         system=RESOLVE_SYSTEM,
-        tools=[RESOLVE_TOOL],
-        tool_choice={"type": "tool", "name": "report_resolution"},
-        messages=[{"role": "user", "content": prompt}],
+        user=prompt,
+        tool=RESOLVE_TOOL,
+        max_tokens=256,
     )
-
-    for block in response.content:
-        if block.type == "tool_use" and block.name == "report_resolution":
-            data = block.input
-            score = max(0.0, min(1.0, float(data.get("resolution_score", 0.0))))
-            return ResolutionResult(score=score, reasoning=str(data.get("reasoning", "")))
-
-    return ResolutionResult(score=0.0, reasoning="Resolution scoring failed.")
+    if not data:
+        return ResolutionResult(score=0.0, reasoning="Resolution scoring failed.")
+    score = max(0.0, min(1.0, float(data.get("resolution_score", 0.0))))
+    return ResolutionResult(score=score, reasoning=str(data.get("reasoning", "")))
 
 
 CONFIRM_QUESTION = "Did we resolve everything today?"
@@ -398,28 +390,26 @@ def looks_like_customer_done(text: str) -> bool:
 
 
 def classify_resolution_confirm(
-    client: anthropic.Anthropic,
+    client: OpenAI,
     *,
     model: str,
     user_message: str,
 ) -> ConfirmResult:
-    response = client.messages.create(
+    data = complete_tool(
+        client,
         model=model,
-        max_tokens=200,
         system=CONFIRM_SYSTEM,
-        tools=[CONFIRM_TOOL],
-        tool_choice={"type": "tool", "name": "report_resolution_confirm"},
-        messages=[{"role": "user", "content": user_message}],
+        user=user_message,
+        tool=CONFIRM_TOOL,
+        max_tokens=200,
     )
-    for block in response.content:
-        if block.type == "tool_use" and block.name == "report_resolution_confirm":
-            data = block.input
-            return ConfirmResult(
-                confirmed=bool(data.get("confirmed")),
-                has_new_issue=bool(data.get("has_new_issue")),
-                reasoning=str(data.get("reasoning", "")),
-            )
-    return ConfirmResult(confirmed=False, has_new_issue=True, reasoning="Confirm classify failed.")
+    if not data:
+        return ConfirmResult(confirmed=False, has_new_issue=True, reasoning="Confirm classify failed.")
+    return ConfirmResult(
+        confirmed=bool(data.get("confirmed")),
+        has_new_issue=bool(data.get("has_new_issue")),
+        reasoning=str(data.get("reasoning", "")),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -694,7 +684,7 @@ def _policy_text() -> str:
 
 
 def find_restock_offer(
-    client: anthropic.Anthropic,
+    client: OpenAI,
     *,
     model: str,
     traces: list[dict[str, Any]],
@@ -723,20 +713,14 @@ Rules:
         f"## Live inventory snapshot (title | author | format | stock | isbn)\n{compact_inventory(inventory)}"
     )
 
-    response = client.messages.create(
+    match = complete_tool(
+        client,
         model=model,
-        max_tokens=300,
         system=match_system,
-        tools=[MATCH_TOOL],
-        tool_choice={"type": "tool", "name": "report_restock_match"},
-        messages=[{"role": "user", "content": prompt}],
+        user=prompt,
+        tool=MATCH_TOOL,
+        max_tokens=300,
     )
-
-    match: dict[str, Any] | None = None
-    for block in response.content:
-        if block.type == "tool_use" and block.name == "report_restock_match":
-            match = block.input
-            break
     if not match or not match.get("should_offer"):
         return None
 

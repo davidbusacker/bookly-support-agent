@@ -21,7 +21,7 @@ AGENT_NAME = "Riley"
 AGENT_VERSION = "1.1.0"
 CHANNEL = "chat"
 
-# Written by orchestration — not exposed to Claude as callable tools.
+# Written by orchestration — not exposed to Riley as callable tools.
 ORCHESTRATION_TRACE_TOOLS = frozenset(
     {"log_agent_trace", "append_agent_trace_messages", "update_agent_trace"}
 )

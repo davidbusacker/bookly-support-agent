@@ -81,7 +81,7 @@ def _apply_return_window_blurbs(tools: list) -> list:
 def _build_tools_schema() -> list:
     # Trace write tools are orchestrated by app.py; agent may read traces.
     bookly_tools = [
-        t for t in _client.anthropic_tools() if t["name"] not in ORCHESTRATION_TRACE_TOOLS
+        t for t in _client.chat_tools() if t["name"] not in ORCHESTRATION_TRACE_TOOLS
     ]
     return _apply_return_window_blurbs(bookly_tools) + [READ_AOP_TOOL, VERIFY_PHONE_TOOL]
 
@@ -103,7 +103,7 @@ def execute_tool(
 
     if name == "verify_phone_last_four":
         # Skill may call get_order / list_customers via the Bookly client directly
-        # (bypasses this ACL) — only to read phone digits, never returned to Claude.
+        # (bypasses this ACL) — only to read phone digits, never returned to the model.
         return verify_phone_last_four(
             _client.execute_tool,
             last_four=str(tool_input.get("last_four", "")),

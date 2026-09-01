@@ -1,16 +1,18 @@
 """
-Riley's tool-use loop for one turn: stream Claude, run tools via tools.py, repeat until text.
+Riley's tool-use loop for one turn: stream OpenAI, run tools via tools.py, repeat until text.
 Called from pipeline.chat_events after intent passes; compact_history trims old tool JSON first.
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
+from llm import openai_tools_from_schema, parse_tool_arguments
 from tools import TOOLS_SCHEMA, execute_tool, tool_result_content
 from trace_client import trace_message
 
-from agent.config import ANTHROPIC_MODEL, TOOL_RESULT_KEEP, anthropic_client
+from agent.config import OPENAI_MODEL, TOOL_RESULT_KEEP, openai_client
 from agent.session import Session, maybe_update_identity_from_tool, system_prompt
 
 # Demo UI labels for the peek panel when a tool runs (unlisted tools get a generic label).
@@ -47,59 +49,90 @@ def tool_peek_title(name: str) -> str:
 
 
 def compact_history(messages: list, keep_recent: int = TOOL_RESULT_KEEP) -> None:
-    """Shrink old tool_result payloads so later Claude calls stay small."""
-    tool_idxs = []
-    # User messages after tool rounds look like: role=user, content=[tool_result, ...]
-    for i, msg in enumerate(messages):
-        content = msg.get("content")
-        if msg.get("role") != "user" or not isinstance(content, list):
-            continue
-        if any(isinstance(block, dict) and block.get("type") == "tool_result" for block in content):
-            tool_idxs.append(i)
-    drop = set(tool_idxs[:-keep_recent])
+    """Shrink old tool payloads so later OpenAI calls stay small."""
+    round_starts = [
+        i
+        for i, msg in enumerate(messages)
+        if msg.get("role") == "assistant" and msg.get("tool_calls")
+    ]
+    drop = round_starts[:-keep_recent]
     if not drop:
         return
-    # Keep the last N tool rounds intact; stub out older ones.
+    stub_ids: set[str] = set()
     for i in drop:
-        compacted = []
-        for block in messages[i]["content"]:
-            if isinstance(block, dict) and block.get("type") == "tool_result":
-                compacted.append(
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": block.get("tool_use_id"),
-                        "content": '{"ok": true, "omitted": "prior tool result trimmed"}',
-                    }
-                )
-            else:
-                compacted.append(block)
-        messages[i] = {"role": "user", "content": compacted}
+        for call in messages[i].get("tool_calls") or []:
+            call_id = call.get("id")
+            if call_id:
+                stub_ids.add(call_id)
+    if not stub_ids:
+        return
+    for i, msg in enumerate(messages):
+        if msg.get("role") == "tool" and msg.get("tool_call_id") in stub_ids:
+            messages[i] = {
+                **msg,
+                "content": '{"ok": true, "omitted": "prior tool result trimmed"}',
+            }
 
 
-def _claude_message(history: list, system: str):
-    """One streaming Claude call. Yields live text deltas, then the full Message."""
+def _openai_message(history: list, system: str):
+    """One streaming OpenAI call. Yields live text deltas, then the assembled turn."""
     tool_started = False
-    with anthropic_client.messages.stream(
-        model=ANTHROPIC_MODEL,
+    text_parts: list[str] = []
+    acc: dict[int, dict[str, str]] = {}
+    finish_reason = None
+
+    stream = openai_client.chat.completions.create(
+        model=OPENAI_MODEL,
         max_tokens=512,
-        system=system,
-        tools=TOOLS_SCHEMA,
-        messages=history,
-    ) as stream:
-        # Stop forwarding text once Claude begins a tool_use block (avoids leaking partial JSON).
-        for event in stream:
-            event_type = getattr(event, "type", None)
-            if event_type == "content_block_start":
-                block = getattr(event, "content_block", None)
-                if block is not None and getattr(block, "type", None) == "tool_use":
-                    tool_started = True
-            elif event_type == "content_block_delta" and not tool_started:
-                delta = getattr(event, "delta", None)
-                if delta is not None and getattr(delta, "type", None) == "text_delta":
-                    chunk = getattr(delta, "text", "") or ""
-                    if chunk:
-                        yield {"type": "delta", "text": chunk}
-        yield {"type": "_message", "message": stream.get_final_message()}
+        messages=[{"role": "system", "content": system}, *history],
+        tools=openai_tools_from_schema(TOOLS_SCHEMA),
+        stream=True,
+    )
+    for chunk in stream:
+        if not chunk.choices:
+            continue
+        choice = chunk.choices[0]
+        if choice.finish_reason:
+            finish_reason = choice.finish_reason
+        delta = choice.delta
+        if delta is None:
+            continue
+        if delta.tool_calls:
+            tool_started = True
+            for call in delta.tool_calls:
+                slot = acc.setdefault(call.index, {"id": "", "name": "", "arguments": ""})
+                if call.id:
+                    slot["id"] = call.id
+                function = call.function
+                if function is None:
+                    continue
+                if function.name:
+                    slot["name"] = function.name
+                if function.arguments:
+                    slot["arguments"] += function.arguments
+        elif delta.content and not tool_started:
+            text_parts.append(delta.content)
+            yield {"type": "delta", "text": delta.content}
+
+    tool_calls = []
+    for index in sorted(acc):
+        slot = acc[index]
+        tool_calls.append(
+            {
+                "id": slot["id"],
+                "name": slot["name"],
+                "input": parse_tool_arguments(slot["arguments"]),
+                "arguments_raw": slot["arguments"],
+            }
+        )
+    yield {
+        "type": "_message",
+        "message": {
+            "finish_reason": finish_reason,
+            "text": "".join(text_parts),
+            "tool_calls": tool_calls,
+        },
+    }
 
 
 def run_agent_turn(
@@ -117,73 +150,77 @@ def run_agent_turn(
     """
     compact_history(history)
     tools_used: list[str] = []
-    tool_traces: list[dict[str, Any]] = []  # logged to Bookly trace by pipeline.py
+    tool_traces: list[dict[str, Any]] = []
     streamed_text = False
 
-    # Outer loop: each pass is one Claude API call. Re-enter when stop_reason == tool_use.
     while True:
         response = None
-        # Inner loop: relay streamed tokens to the browser until the Message is complete.
-        for event in _claude_message(history, system_prompt(session)):
+        for event in _openai_message(history, system_prompt(session)):
             if event.get("type") == "_message":
                 response = event["message"]
             else:
                 streamed_text = True
                 yield event
         if response is None:
-            raise RuntimeError("Claude stream ended without a message.")
+            raise RuntimeError("OpenAI stream ended without a message.")
 
-        # --- Tool path: Claude chose one or more tools instead of (or before) replying ---
-        if response.stop_reason == "tool_use":
-            history.append({"role": "assistant", "content": response.content})
-            tool_results = []
-            for block in response.content:
-                if getattr(block, "type", None) != "tool_use":
-                    continue
-                yield {"type": "status", "text": tool_peek_title(block.name)}
-                # tools.execute_tool routes to Bookly MCP, read_aop, or verify_phone; ACL checks auth.
+        tool_calls = response.get("tool_calls") or []
+        if response.get("finish_reason") == "tool_calls" or tool_calls:
+            history.append(
+                {
+                    "role": "assistant",
+                    "content": response.get("text") or None,
+                    "tool_calls": [
+                        {
+                            "id": call["id"],
+                            "type": "function",
+                            "function": {
+                                "name": call["name"],
+                                "arguments": call["arguments_raw"]
+                                or json.dumps(call["input"]),
+                            },
+                        }
+                        for call in tool_calls
+                    ],
+                }
+            )
+            for call in tool_calls:
+                yield {"type": "status", "text": tool_peek_title(call["name"])}
                 result = execute_tool(
-                    block.name,
-                    block.input,
+                    call["name"],
+                    call["input"],
                     session_id=session_id,
                     authenticated=session.authenticated,
                 )
                 if result.get("error") == "authentication_required":
-                    yield {"type": "status", "text": f"Blocked {block.name} — not authenticated"}
-                # verify_phone may set session.authenticated; get_order may set customer_email.
-                maybe_update_identity_from_tool(session, block.name, result)
-                if block.name == "verify_phone_last_four" and result.get("verified"):
+                    yield {"type": "status", "text": f"Blocked {call['name']} — not authenticated"}
+                maybe_update_identity_from_tool(session, call["name"], result)
+                if call["name"] == "verify_phone_last_four" and result.get("verified"):
                     yield {"type": "status", "text": "Authenticated"}
-                tools_used.append(block.name)
+                tools_used.append(call["name"])
                 tool_traces.append(
                     trace_message(
                         role="tool",
                         speaker="Riley",
-                        content=f"Called `{block.name}`",
-                        tool_name=block.name,
-                        tool_input=block.input,
+                        content=f"Called `{call['name']}`",
+                        tool_name=call["name"],
+                        tool_input=call["input"],
                         tool_output=result,
                     )
                 )
-                tool_results.append(
+                history.append(
                     {
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
+                        "role": "tool",
+                        "tool_call_id": call["id"],
                         "content": tool_result_content(result),
                     }
                 )
-            # Anthropic expects tool results as the next user message, then Claude is called again.
-            history.append({"role": "user", "content": tool_results})
             continue
 
-        # --- Reply path: Claude finished with customer-facing text (stop_reason == end_turn) ---
-        final_text = "".join(
-            block.text for block in response.content if getattr(block, "type", None) == "text"
-        )
-        # If nothing was streamed (e.g. text-only after tools), emit the full reply once.
+        final_text = response.get("text") or ""
         if not streamed_text and final_text:
             yield {"type": "delta", "text": final_text}
-        history.append({"role": "assistant", "content": response.content})
+        history.append({"role": "assistant", "content": final_text})
         yield {
             "type": "_result",
             "reply": final_text,

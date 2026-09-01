@@ -1,6 +1,6 @@
 """
 Reads aops/*.md, builds the system-prompt catalog (title + when to load), inlines startup policies.
-Adding a policy is a new markdown file with frontmatter; format_aop_catalog() is what Claude sees.
+Adding a policy is a new markdown file with frontmatter; format_aop_catalog() is what the model sees.
 """
 
 from __future__ import annotations

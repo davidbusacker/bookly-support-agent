@@ -61,7 +61,7 @@ def verify_phone_last_four(
     if last_four_clean != expected:
         return {"ok": True, "verified": False, "message": "Digits do not match."}
 
-    # Orchestrator-only: stripped before Claude sees the tool result.
+    # Orchestrator-only: stripped before the model sees the tool result.
     session_patch: dict[str, Any] = {}
     found_email = customer.get("email") or email
     if found_email:

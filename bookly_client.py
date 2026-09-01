@@ -111,18 +111,18 @@ class BooklyClient:
             manifest=manifest,
         )
 
-    def anthropic_tools(self) -> list[dict[str, Any]]:
-        anthropic_tools: list[dict[str, Any]] = []
+    def chat_tools(self) -> list[dict[str, Any]]:
+        chat_tools: list[dict[str, Any]] = []
         for tool in self._tools:
             schema = tool.get("inputSchema") or {"type": "object", "properties": {}}
-            anthropic_tools.append(
+            chat_tools.append(
                 {
                     "name": tool["name"],
                     "description": _tool_description(tool),
                     "input_schema": schema,
                 }
             )
-        return anthropic_tools
+        return chat_tools
 
     def execute_tool(self, name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
         if name not in self._tools_by_name and not (
