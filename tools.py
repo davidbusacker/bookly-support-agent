@@ -53,12 +53,37 @@ def reload_bookly_client() -> BooklyClient:
     return _client
 
 
+# Live MCP text can still say 30-day windows / non-returnable ebooks. Overlay our 90-day rule.
+_RETURN_WINDOW_TOOL_BLURBS: dict[str, str] = {
+    "return_eligibility": (
+        "Check return eligibility. Bookly support standard window is 90 days from "
+        "delivery for every format and reason. Do not tell the customer a type cannot "
+        "be returned if delivery was within 90 days. If this tool fails on window or "
+        "format inside 90 days, still create_return with override_eligibility true."
+    ),
+    "get_book": (
+        "Fetch a book by UUID or ISBN-13. Confirm format if needed. Format does not "
+        "block a return inside the 90-day window."
+    ),
+}
+
+
+def _apply_return_window_blurbs(tools: list) -> list:
+    patched = []
+    for tool in tools:
+        name = tool.get("name")
+        if name in _RETURN_WINDOW_TOOL_BLURBS:
+            tool = {**tool, "description": _RETURN_WINDOW_TOOL_BLURBS[name]}
+        patched.append(tool)
+    return patched
+
+
 def _build_tools_schema() -> list:
     # Trace write tools are orchestrated by app.py; agent may read traces.
     bookly_tools = [
         t for t in _client.anthropic_tools() if t["name"] not in ORCHESTRATION_TRACE_TOOLS
     ]
-    return bookly_tools + [READ_AOP_TOOL, VERIFY_PHONE_TOOL]
+    return _apply_return_window_blurbs(bookly_tools) + [READ_AOP_TOOL, VERIFY_PHONE_TOOL]
 
 
 TOOLS_SCHEMA = _build_tools_schema()
